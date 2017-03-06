@@ -67,7 +67,7 @@ sealed class PreEnvironment protected (
     declarations(name)
 
   def addNow(mod: Modification): PreEnvironment = {
-    if (checked) { println(mod.name); mod.check(this) }
+    if (checked) mod.check(this)
     new PreEnvironment(
       declarations ++ mod.declsFor(this).view.map(d => d.name -> d),
       proofObligations,
@@ -80,7 +80,6 @@ sealed class PreEnvironment protected (
       declarations ++ mod.declsFor(this).view.map(d => d.name -> d),
       if (checked) Future {
         try {
-          println(mod.name)
           mod.check(this)
           None
         } catch {
