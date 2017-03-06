@@ -1,18 +1,21 @@
 package trepplein
 
 import scala.concurrent.{ ExecutionContext, Future }
+import scala.language.implicitConversions
 
 abstract class Declaration {
   def name: Name
   def univParams: Vector[Level.Param]
   def ty: Expr
 
-  def asAxiom = Axiom(name, univParams, ty)
+  def asAxiom: Axiom = Axiom(name, univParams, ty)
 }
 final case class Axiom(name: Name, univParams: Vector[Level.Param], ty: Expr) extends Declaration {
   def check(env: PreEnvironment): Unit = {
     require(!env.declarations.contains(name))
     require(ty.univParams.subsetOf(univParams.toSet))
+    require(!ty.hasVars)
+    require(!ty.hasLocals)
     val tc = new TypeChecker(env)
     require(tc.infer(ty).isInstanceOf[Sort])
   }
@@ -21,6 +24,8 @@ final case class Definition(name: Name, univParams: Vector[Level.Param],
     ty: Expr, value: Expr, height: Int = 0) extends Declaration {
   def check(env: PreEnvironment): Unit = {
     asAxiom.check(env)
+    require(!value.hasVars)
+    require(!value.hasLocals)
     val tc = new TypeChecker(env)
     tc.requireDefEq(tc.infer(value), ty)
   }
@@ -37,12 +42,12 @@ object Modification {
   implicit def ofAxiom(axiom: Axiom): Modification = AxiomMod(axiom)
 }
 final case class AxiomMod(ax: Axiom) extends Modification {
-  def name = ax.name
+  def name: Name = ax.name
   override def declsFor(env: PreEnvironment): Seq[Declaration] = Seq(ax)
   override def check(env: PreEnvironment): Unit = ax.check(env)
 }
 final case class DefMod(defn: Definition) extends Modification {
-  def name = defn.name
+  def name: Name = defn.name
   override def declsFor(env: PreEnvironment): Seq[Declaration] =
     Seq(defn) // TODO: definitional height
   override def check(env: PreEnvironment): Unit = defn.check(env)
@@ -50,7 +55,8 @@ final case class DefMod(defn: Definition) extends Modification {
 
 sealed class PreEnvironment protected (
     val declarations: Map[Name, Declaration],
-    val proofObligations: List[Future[Option[Throwable]]]
+    val proofObligations: List[Future[Option[Throwable]]],
+    val checked: Boolean
 ) {
 
   def get(name: Name): Option[Declaration] =
@@ -59,17 +65,18 @@ sealed class PreEnvironment protected (
     declarations(name)
 
   def addNow(mod: Modification): PreEnvironment = {
-    mod.check(this)
+    if (checked) mod.check(this)
     new PreEnvironment(
       declarations ++ mod.declsFor(this).view.map(d => d.name -> d),
-      proofObligations
+      proofObligations,
+      checked
     )
   }
 
   def add(mod: Modification)(implicit executionContext: ExecutionContext): PreEnvironment =
     new PreEnvironment(
       declarations ++ mod.declsFor(this).view.map(d => d.name -> d),
-      Future {
+      if (checked) Future {
         try {
           println(mod.name)
           mod.check(this)
@@ -79,14 +86,20 @@ sealed class PreEnvironment protected (
             Some(new Exception(s"${mod.name}: ${t.getMessage}", t))
         }
       } :: proofObligations
+      else Nil,
+      checked
     )
 
-  def force(implicit executionContext: ExecutionContext): Future[Either[Seq[Throwable], Environment]] =
+  def unchecked: PreEnvironment = new PreEnvironment(declarations, Nil, checked = false)
+
+  def force(implicit executionContext: ExecutionContext): Future[Either[Seq[Throwable], Environment]] = {
+    require(checked)
     Environment.force(this)
+  }
 }
 
 final class Environment private (declarations: Map[Name, Declaration])
-  extends PreEnvironment(declarations, Nil)
+  extends PreEnvironment(declarations, Nil, checked = true)
 object Environment {
   def force(preEnvironment: PreEnvironment)(implicit executionContext: ExecutionContext): Future[Either[Seq[Throwable], Environment]] =
     Future.sequence(preEnvironment.proofObligations).map(_.flatten).map {

@@ -3,6 +3,7 @@ package trepplein
 import Name._
 
 import scala.annotation.tailrec
+import scala.language.implicitConversions
 import scala.runtime.ScalaRunTime
 
 sealed abstract class Name extends Product {
@@ -42,6 +43,13 @@ sealed abstract class Name extends Product {
     write(this)
     buf.result()
   }
+
+  def dump: String =
+    this match {
+      case Anon => "Name.Anon"
+      case Str(prefix, limb) => s"""Name.Str(${prefix.dump}, "$limb")"""
+      case Num(prefix, limb) => s"Name.Num(${prefix.dump}, $limb)"
+    }
 }
 object Name {
   def apply(limbs: String*): Name =

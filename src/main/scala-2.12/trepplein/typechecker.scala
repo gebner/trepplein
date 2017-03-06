@@ -5,60 +5,63 @@ import scala.collection.mutable
 class TypeChecker(env: PreEnvironment) {
   def isDefEq(a: Level, b: Level): Boolean = NLevel.isEq(a, b)
 
-  def isDefEq(dom1: Binding, dom2: Binding): Boolean =
-    //    dom1.info == dom2.info && TODO
-    isDefEq(dom1.ty, dom2.ty)
+  def checkDefEq(dom1: Binding, dom2: Binding): DefEqRes =
+    checkDefEq(dom1.ty, dom2.ty)
 
-  private def checkProofIrrelevantEq(e1: Expr, e2: Expr): Boolean =
-    (whnf(infer(infer(e1))), whnf(infer(infer(e2)))) match {
-      case (Sort(l1), Sort(l2)) if NLevel.isZero(l1) && NLevel.isZero(l2) =>
-        true
-      case (_, _) =>
-        false
-    }
+  def isProp(s: Expr): Boolean = whnf(s) match {
+    case Sort(Level.Zero) => true
+    case _ => false
+  }
+  def isProposition(ty: Expr): Boolean = isProp(infer(ty))
+  def isProof(p: Expr): Boolean = isProposition(infer(p))
 
-  private val defEqCache = mutable.Map[(Expr, Expr), Boolean]()
-  def isDefEq(e1: Expr, e2: Expr): Boolean =
-    e1.eq(e2) || defEqCache.getOrElseUpdate((e1, e2), ((whnf(e1), whnf(e2)) match {
+  private def isProofIrrelevantEq(e1: Expr, e2: Expr): Boolean =
+    isProof(e1) && isProof(e2) && checkDefEq(infer(e1), infer(e2)).isEmpty
+
+  type DefEqRes = Option[(Expr, Expr)]
+  private def reqDefEq(cond: Boolean, e1: Expr, e2: Expr) =
+    if (cond) None else Some((e1, e2))
+
+  def isDefEq(e1: Expr, e2: Expr): Boolean = checkDefEq(e1, e2).isEmpty
+
+  private val defEqCache = mutable.Map[(Expr, Expr), DefEqRes]()
+  def checkDefEq(e1: Expr, e2: Expr): DefEqRes =
+    if (e1.eq(e2)) None else defEqCache.getOrElseUpdate((e1, e2), ((whnf(e1), whnf(e2)) match {
       case (Sort(l1), Sort(l2)) =>
-        isDefEq(l1, l2)
+        reqDefEq(isDefEq(l1, l2), e1, e2)
       case (Const(c1, ls1), Const(c2, ls2)) =>
-        require(c1 == c2)
-        require(ls1.size == ls2.size)
-        c1 == c2 && ls1.size == ls2.size && (ls1, ls2).zipped.forall(isDefEq)
+        reqDefEq(c1 == c2 && ls1.size == ls2.size && (ls1, ls2).zipped.forall(isDefEq), e1, e2)
       case (LocalConst(_, i1), LocalConst(_, i2)) =>
-        i1 == i2
+        reqDefEq(i1 == i2, e1, e2)
       case (App(a1, b1), App(a2, b2)) =>
-        isDefEq(a1, a2) && isDefEq(b1, b2)
+        checkDefEq(infer(a1), infer(a2)) orElse checkDefEq(a1, a2) orElse checkDefEq(b1, b2)
       case (Lam(dom1, b1), Lam(dom2, b2)) =>
         val lc = LocalConst(dom1)
-        isDefEq(dom1, dom2) && isDefEq(b1.instantiate(lc), b2.instantiate(lc))
+        checkDefEq(dom1, dom2) orElse checkDefEq(b1.instantiate(lc), b2.instantiate(lc))
       case (e1_ @ Lam(dom1, _), e2_) =>
-        isDefEq(e1_, Lam(dom1, App(e2_, Var(0))))
+        checkDefEq(e1_, Lam(dom1, App(e2_, Var(0))))
       case (e1_, e2_ @ Lam(dom2, _)) =>
-        isDefEq(Lam(dom2, App(e1_, Var(0))), e2_)
+        checkDefEq(Lam(dom2, App(e1_, Var(0))), e2_)
       case (Pi(dom1, b1), Pi(dom2, b2)) =>
         val lc = LocalConst(dom1)
-        isDefEq(dom1, dom2) && isDefEq(b1.instantiate(lc), b2.instantiate(lc))
-      case (_, _) =>
-        false
-    }) || checkProofIrrelevantEq(e1, e2))
+        checkDefEq(dom1, dom2) orElse checkDefEq(b1.instantiate(lc), b2.instantiate(lc))
+      case (e1_, e2_) =>
+        Some((e1_, e2_))
+    }).filter(_ => !isProofIrrelevantEq(e1, e2)))
 
-  private def whnfK(major: Expr, elim: Elim): Expr = {
+  private def whnfK(major: Expr, elim: Elim): Expr =
     elim.kIntro match {
       case Some(i) =>
         whnf(infer(major)) match {
           case majorTy @ Apps(Const(_, univParams), as) =>
             val synthIntro = Apps(Const(i, univParams), as.take(elim.numParams))
-            if (isDefEq(infer(synthIntro), majorTy)) {
+            if (isDefEq(infer(synthIntro), majorTy))
               synthIntro
-            } else {
-              major
-            }
+            else
+              whnf(major)
         }
-      case None => major
+      case None => whnf(major)
     }
-  }
 
   private val whnfCache = mutable.Map[Expr, Expr]()
   def whnf(e: Expr): Expr = whnfCache.getOrElseUpdate(e, {
@@ -75,26 +78,39 @@ class TypeChecker(env: PreEnvironment) {
           case Some(defn: Definition) =>
             whnf(Apps(defn.value.instantiate(defn.univParams.zip(levels).toMap), as))
           case Some(elim: Elim) =>
-            val e_ = (for {
+            (for {
               major <- as.drop(elim.major).headOption
               Apps(Const(introC, _), introArgs) <- Some(whnfK(major, elim))
               Intro(_, _, indTy, _, compRule) <- env.get(introC)
-              _ = require(indTy.name == elim.ind.name, "inductive type does not match")
+              if indTy.name == elim.ind.name
             } yield whnf(
               Apps(
                 compRule.instantiate(elim.univParams.zip(levels).toMap),
                 as.take(elim.numParams + 1 + elim.numMinors) ++ introArgs.drop(elim.numParams) ++ as.drop(elim.major + 1)
               )
             )).getOrElse(e)
-            require(isDefEq(infer(e), infer(e_)))
-            e_
-          case Some(_) => e
+          case Some(QuotLift) if as.size >= 6 =>
+            whnf(as(5)) match {
+              case Apps(Const(quotMk, _), mkArgs) if env.get(quotMk).contains(QuotMk) =>
+                whnf(Apps(App(as(3), mkArgs(2)), as.drop(6)))
+              case _ =>
+                e
+            }
+          case _ => e
         }
       case _: Var | _: LocalConst | _: Lam | _: Pi => e
     }
   })
 
-  def requireDefEq(a: Expr, b: Expr): Unit = require(isDefEq(a, b), s"\n$a =def\n$b")
+  def requireDefEq(a: Expr, b: Expr): Unit =
+    for ((a_, b_) <- checkDefEq(a, b))
+      throw new IllegalArgumentException(s"\n$a_ =def\n$b_")
+
+  def inferUniverseOfType(ty: Expr): Level =
+    whnf(infer(ty)) match {
+      case Sort(l) => l
+      case s => throw new IllegalArgumentException(s"not a sort: $s")
+    }
 
   private val inferCache = mutable.Map[Expr, Expr]()
   def infer(e: Expr): Expr = inferCache.getOrElseUpdate(e, e match {
@@ -120,17 +136,14 @@ class TypeChecker(env: PreEnvironment) {
           throw new IllegalArgumentException(s"not a function: $a_")
       }
     case Lam(domain, body) =>
-      require(whnf(infer(domain.ty)).isInstanceOf[Sort])
+      inferUniverseOfType(domain.ty)
       val lc = LocalConst(domain)
       Pi(domain, infer(body.instantiate(lc)).abstr(lc))
     case Pi(domain, body) =>
       val lc = LocalConst(domain)
-      (whnf(infer(domain.ty)), whnf(infer(body.instantiate(lc)))) match {
-        case (Sort(l1), Sort(l2)) =>
-          Sort(NLevel.simplify(Level.IMax(l1, l2)))
-      }
+      Sort(NLevel.simplify(Level.IMax(inferUniverseOfType(domain.ty), inferUniverseOfType(body.instantiate(lc)))))
     case Let(domain, value, body) =>
-      require(infer(domain.ty).isInstanceOf[Sort])
+      inferUniverseOfType(domain.ty)
       requireDefEq(domain.ty, infer(value))
       infer(body.instantiate(value))
   })

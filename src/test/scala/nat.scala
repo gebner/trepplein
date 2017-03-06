@@ -33,7 +33,7 @@ class NatTest extends Specification {
 
   "add" in {
     val t = Apps(natAdd, numeral(2), numeral(4))
-    tc.isDefEq(tc.infer(t), nat) must_== true
-    tc.isDefEq(t, numeral(6)) must_== true
+    tc.checkDefEq(tc.infer(t), nat) must_== true
+    tc.checkDefEq(t, numeral(6)) must_== true
   }
 }

@@ -11,27 +11,40 @@ final case class Intro(name: Name, ty: Expr, ind: InductiveType, univParams: Vec
 
 final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) {
   import indMod._
-  val tc = new TypeChecker(env)
+  val tc = new TypeChecker(env.unchecked.addNow(inductiveType.asAxiom))
 
   def name: Name = inductiveType.name
 
   def univParams: Vector[Param] = inductiveType.univParams
   val indTy = Const(inductiveType.name, univParams)
 
+  object NormalizedPis {
+    def unapply(e: Expr): Some[(List[LocalConst], Expr)] =
+      tc.whnf(e) match {
+        case Pis(lcs1, f) if lcs1.nonEmpty =>
+          val NormalizedPis(lcs2, g) = f
+          Some((lcs1 ::: lcs2, g))
+        case f => Some((Nil, f))
+      }
+
+    def normalize(e: Expr): Expr =
+      e match { case NormalizedPis(xs, f) => Pis(xs)(f) }
+
+    def instantiate(e: Expr, ts: Seq[Expr]): Expr =
+      Pis.instantiate(normalize(e), ts)
+  }
+
   val ((params, indices), level) =
     inductiveType.ty match {
-      case Pis(doms, Sort(lvl)) =>
+      case NormalizedPis(doms, Sort(lvl)) =>
         (doms.splitAt(numParams), lvl)
     }
 
   val elimIntoProp: Boolean = !NLevel.isNonZero(level) && (intros.size > 1 || intros.exists {
-    case (_, Pis(doms, Apps(Const(inductiveType.name, _), introIndTyArgs))) =>
+    case (_, NormalizedPis(doms, Apps(Const(inductiveType.name, _), introIndTyArgs))) =>
       val arguments = doms.drop(params.size)
       arguments.exists { arg =>
-        tc.whnf(tc.infer(tc.infer(arg))) match {
-          case Sort(l) => !NLevel.isZero(l)
-          case _ => true
-        }
+        !tc.isProof(arg) && !introIndTyArgs.contains(arg)
       }
   })
 
@@ -40,27 +53,29 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) {
 
   val useDepElim: Boolean = level != Level.Zero
 
-  val motive: LocalConst = if (useDepElim)
-    LocalConst(Binding("C", Pis(indices :+ LocalConst(Binding("c", Apps(indTy, params ++ indices), BinderInfo.Default)))(Sort(elimLevel)), BinderInfo.Default))
-  else
-    LocalConst(Binding("C", Pis(indices)(Sort(elimLevel)), BinderInfo.Default))
+  val motiveType: Expr =
+    if (useDepElim)
+      Pis(indices :+ LocalConst(Binding("c", Apps(indTy, params ++ indices), BinderInfo.Default)))(Sort(elimLevel))
+    else
+      Pis(indices)(Sort(elimLevel))
+  val motive = LocalConst(Binding("C", motiveType, BinderInfo.Implicit))
 
   def mkMotiveApp(indices: Seq[Expr], e: Expr): Expr =
     if (useDepElim) App(Apps(motive, indices), e) else Apps(motive, indices)
 
   val minorPremises: Vector[LocalConst] = intros.map {
     case (n, ty) =>
-      Pis.drop(params.size, ty).instantiate(0, params.toVector.reverse) match {
-        case Pis(arguments, Apps(Const(inductiveType.name, _), introIndTyArgs)) =>
+      NormalizedPis.instantiate(ty, params) match {
+        case NormalizedPis(arguments, Apps(Const(inductiveType.name, _), introIndTyArgs)) =>
           val ihs = arguments.collect {
-            case recArg @ LocalConst(Binding(_, Pis(eps, Apps(Const(inductiveType.name, _), indTyArgs)), _), _) =>
+            case recArg @ LocalConst(Binding(_, NormalizedPis(eps, Apps(Const(inductiveType.name, _), indTyArgs)), _), _) =>
               LocalConst(Binding("ih", Pis(eps)(mkMotiveApp(indTyArgs.drop(numParams), Apps(recArg, eps))), BinderInfo.Default))
           }
           LocalConst(Binding("h", Pis(arguments ++ ihs)(mkMotiveApp(introIndTyArgs.drop(numParams), Apps(Const(n, univParams), params ++ arguments))), BinderInfo.Default))
       }
   }
 
-  val kIntro = intros match {
+  val kIntro: Option[Name] = intros match {
     case Vector((n, Pis(ps, _))) if ps.size == numParams && level == Level.Zero => Some(n)
     case _ => None
   }
@@ -69,20 +84,19 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) {
 
   val elimType: Expr = Pis(params ++ Seq(motive) ++ minorPremises ++ indices :+ majorPremise)(mkMotiveApp(indices, majorPremise))
 
-  val elimLevelParams = extraElimLevelParams ++ univParams
+  val elimLevelParams: Vector[Param] = extraElimLevelParams ++ univParams
   val elimDecl = Elim(Name.Str(name, "rec"), elimType, inductiveType, elimLevelParams,
     numParams = numParams, motive = numParams, numIndices = indices.size, numMinors = minorPremises.size,
     major = numParams + 1 + minorPremises.size + indices.size, depElim = useDepElim,
     kIntro = kIntro)
 
-  val compRules = intros.zip(minorPremises).map {
-    case ((n, ty), minor) =>
-      Pis.drop(params.size, ty).instantiate(0, params.toVector.reverse) match {
-        case Pis(arguments, Apps(Const(inductiveType.name, _), introIndTyArgs)) =>
+  val compRules: Vector[Expr] = intros.zip(minorPremises).map {
+    case ((_, ty), minor) =>
+      NormalizedPis.instantiate(ty, params) match {
+        case NormalizedPis(arguments, Apps(Const(inductiveType.name, _), _)) =>
           val ihs = arguments.collect {
-            case recArg @ LocalConst(Binding(_, Pis(eps, Apps(Const(inductiveType.name, _), indTyArgs)), _), _) =>
-              // TODO: eps
-              Apps(Const(elimDecl.name, elimLevelParams), params ++ Seq(motive) ++ minorPremises ++ indTyArgs.drop(numParams) :+ recArg)
+            case recArg @ LocalConst(Binding(_, NormalizedPis(eps, Apps(Const(inductiveType.name, _), indTyArgs)), _), _) =>
+              Lams(eps)(Apps(Const(elimDecl.name, elimLevelParams), params ++ Seq(motive) ++ minorPremises ++ indTyArgs.drop(numParams) :+ Apps(recArg, eps)))
           }
           Lams(params ++ Seq(motive) ++ minorPremises ++ arguments)(
             Apps(minor, arguments ++ ihs)
@@ -94,16 +108,18 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) {
     for (((n, t), cr) <- intros.zip(compRules))
       yield Intro(n, t, inductiveType, inductiveType.univParams, cr)
 
-  val decls = inductiveType +: introDecls :+ elimDecl
+  val decls: Vector[Declaration] = inductiveType +: introDecls :+ elimDecl
 }
 
 final case class IndMod(inductiveType: InductiveType, numParams: Int, intros: Vector[(Name, Expr)]) extends Modification {
-  def name = inductiveType.name
+  def name: Name = inductiveType.name
 
-  def declsFor(env: PreEnvironment) = CompiledIndMod(this, env).decls
+  def declsFor(env: PreEnvironment): Vector[Declaration] = CompiledIndMod(this, env).decls
 
   override def check(env0: PreEnvironment): Unit = {
-    val compiled = new CompiledIndMod(this, env0)
+    val compiled = CompiledIndMod(this, env0)
+    for (introDecl <- compiled.introDecls)
+      require(!introDecl.compRule.hasLocals && !introDecl.compRule.hasVars)
     val withType = env0.addNow(inductiveType.asAxiom)
     val withIntros = compiled.introDecls.foldLeft(withType)((env, i) => { i.asAxiom.check(withType); env.addNow(i.asAxiom) })
     withIntros.addNow(compiled.elimDecl.asAxiom)

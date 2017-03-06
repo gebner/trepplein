@@ -3,9 +3,12 @@ package trepplein
 import trepplein.Level._
 
 import scala.annotation.tailrec
+import scala.collection.mutable
 import scala.runtime.ScalaRunTime
 
-sealed abstract class BinderInfo
+sealed abstract class BinderInfo extends Product {
+  def dump = s"BinderInfo.$productPrefix"
+}
 object BinderInfo {
   case object Default extends BinderInfo
   case object Implicit extends BinderInfo
@@ -18,13 +21,18 @@ case class Binding(prettyName: Name, ty: Expr, info: BinderInfo) {
     copy(ty = ty.abstr(off, lcs))
 
   def instantiate(off: Int, es: Vector[Expr]): Binding =
-    copy(ty = ty.instantiate(off, es))
+    copy(ty = ty.instantiateReverse(off, es))
 
   def instantiate(subst: Map[Param, Level]): Binding =
     copy(ty = ty.instantiate(subst))
+
+  def dump(implicit lcs: mutable.Map[LocalConst.Name, String]) =
+    s"Binding(${prettyName.dump}, ${ty.dump}, ${info.dump})"
 }
 
 sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Product {
+  def hasVars: Boolean = varBound > 0
+
   def abstr(lc: LocalConst): Expr = abstr(0, Vector(lc))
   def abstr(off: Int, lcs: Vector[LocalConst]): Expr =
     this match {
@@ -44,15 +52,15 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
         Let(domain.abstr(off, lcs), value.abstr(off, lcs), body.abstr(off + 1, lcs))
     }
 
-  def instantiate(e: Expr): Expr = instantiate(0, Vector(e))
-  def instantiate(off: Int, es: Vector[Expr]): Expr =
+  def instantiate(e: Expr): Expr = instantiateReverse(0, Vector(e))
+  def instantiateReverse(off: Int, es: Vector[Expr]): Expr =
     this match {
       case _ if varBound <= off => this
       case Var(idx) => if (off <= idx && idx < off + es.size) es(idx - off) else this
-      case App(a, b) => App(a.instantiate(off, es), b.instantiate(off, es))
-      case Lam(domain, body) => Lam(domain.instantiate(off, es), body.instantiate(off + 1, es))
-      case Pi(domain, body) => Pi(domain.instantiate(off, es), body.instantiate(off + 1, es))
-      case Let(domain, value, body) => Let(domain.instantiate(off, es), value.instantiate(off, es), body.instantiate(off + 1, es))
+      case App(a, b) => App(a.instantiateReverse(off, es), b.instantiateReverse(off, es))
+      case Lam(domain, body) => Lam(domain.instantiate(off, es), body.instantiateReverse(off + 1, es))
+      case Pi(domain, body) => Pi(domain.instantiate(off, es), body.instantiateReverse(off + 1, es))
+      case Let(domain, value, body) => Let(domain.instantiate(off, es), value.instantiateReverse(off, es), body.instantiateReverse(off + 1, es))
     }
 
   def instantiate(subst: Map[Param, Level]): Expr =
@@ -86,10 +94,32 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
   override def toString: String = pretty(this)
 
   override val hashCode: Int = ScalaRunTime._hashCode(this)
+
+  def dump(implicit lcs: mutable.Map[LocalConst.Name, String] = null): String =
+    this match {
+      case _ if lcs eq null =>
+        val lcs_ = mutable.Map[LocalConst.Name, String]()
+        val d = dump(lcs_)
+        if (lcs_.isEmpty) d else {
+          val decls = lcs.values.map { n => s"val $n = new LocalConst.Name()\n" }.mkString
+          s"{$decls$d}"
+        }
+      case Var(i) => s"Var($i)"
+      case Sort(level) => s"Sort(${level.dump})"
+      case Const(name, levels) => s"Const(${name.dump}, Vector(${levels.map(_.dump).mkString(", ")}))"
+      case App(a, b) => s"App(${a.dump}, ${b.dump})"
+      case Lam(dom, body) => s"Lam(${dom.dump}, ${body.dump})"
+      case Pi(dom, body) => s"Pi(${dom.dump}, ${body.dump})"
+      case LocalConst(of, name) =>
+        val of1 = of.prettyName.toString.replace('.', '_').filter { _.isLetterOrDigit }
+        val of2 = if (of1.isEmpty || !of1.head.isLetter) s"n$of1" else of1
+        val n = lcs.getOrElseUpdate(name, Stream.from(0).map(i => s"$of2$i").diff(lcs.values.toSeq).head)
+        s"LocalConst(${of.dump}, $n)"
+      case Let(dom, value, body) => s"Let(${dom.dump}, ${value.dump}, ${body.dump})"
+    }
 }
 case class Var(idx: Int) extends Expr(varBound = idx + 1, hasLocals = false)
-case class Sort(level: Level) extends Expr(varBound = 0, hasLocals = false) {
-}
+case class Sort(level: Level) extends Expr(varBound = 0, hasLocals = false)
 
 case class Const(name: Name, levels: Vector[Level]) extends Expr(varBound = 0, hasLocals = false)
 case class LocalConst(of: Binding, name: LocalConst.Name = new LocalConst.Name) extends Expr(varBound = 0, hasLocals = true)
@@ -161,8 +191,11 @@ object Pis {
   def drop(n: Int, e: Expr): Expr =
     e match {
       case _ if n == 0 => e
-      case Pi(dom, b) => drop(n - 1, b)
+      case Pi(_, b) => drop(n - 1, b)
     }
+
+  def instantiate(e: Expr, ts: Seq[Expr]): Expr =
+    drop(ts.size, e).instantiateReverse(0, ts.view.reverse.toVector)
 }
 
 object Apps {

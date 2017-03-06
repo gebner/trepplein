@@ -3,8 +3,19 @@ package trepplein
 import trepplein.Level.{ IMax, Max, _ }
 
 import scala.annotation.tailrec
+import scala.language.implicitConversions
 
 sealed abstract class Level {
+  def dump: String =
+    this match {
+      case Zero => "Level.Zero"
+      case Succ(level) => s"Level.Succ(${level.dump})"
+      //    case Level.Offset(offset, level) if offset > 0 => s"Level.Offset($offset, ${level.dump})"
+      case Max(a, b) => s"Level.Max(${a.dump}, ${b.dump})"
+      case IMax(a, b) => s"Level.IMax(${a.dump}, ${b.dump})"
+      case Param(param) => s"Level.Param(${param.dump})"
+    }
+
   def instantiate(subst: Map[Param, Level]): Level =
     this match {
       case Zero => Zero
