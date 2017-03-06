@@ -3,7 +3,9 @@ package trepplein
 import scala.collection.mutable
 
 class TypeChecker(env: PreEnvironment) {
-  def isDefEq(a: Level, b: Level): Boolean = NLevel.isEq(a, b)
+  private val levelDefEqCache = mutable.Map[(Level, Level), Boolean]()
+  def isDefEq(a: Level, b: Level): Boolean =
+    levelDefEqCache.getOrElseUpdate((a, b), NLevel.isEq(a, b))
 
   def checkDefEq(dom1: Binding, dom2: Binding): DefEqRes =
     checkDefEq(dom1.ty, dom2.ty)
