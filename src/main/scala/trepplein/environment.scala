@@ -48,8 +48,10 @@ final case class AxiomMod(ax: Axiom) extends Modification {
 }
 final case class DefMod(defn: Definition) extends Modification {
   def name: Name = defn.name
-  override def declsFor(env: PreEnvironment): Seq[Declaration] =
-    Seq(defn) // TODO: definitional height
+  override def declsFor(env: PreEnvironment): Seq[Declaration] = {
+    val height = (defn.value.constants.flatMap(env.get).collect { case d: Definition => d.height } + 0).max + 1
+    Seq(defn.copy(height = height))
+  }
   override def check(env: PreEnvironment): Unit = defn.check(env)
 }
 
@@ -65,7 +67,7 @@ sealed class PreEnvironment protected (
     declarations(name)
 
   def addNow(mod: Modification): PreEnvironment = {
-    if (checked) mod.check(this)
+    if (checked) { println(mod.name); mod.check(this) }
     new PreEnvironment(
       declarations ++ mod.declsFor(this).view.map(d => d.name -> d),
       proofObligations,

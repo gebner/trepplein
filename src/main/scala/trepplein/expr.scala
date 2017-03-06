@@ -88,6 +88,18 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
       case Let(domain, value, body) => domain.ty.univParams union value.univParams union body.univParams
     }
 
+  def constants: Set[Name] =
+    this match {
+      case Var(_) => Set()
+      case Sort(_) => Set()
+      case Const(name, _) => Set(name)
+      case LocalConst(_, _) => Set()
+      case App(a, b) => a.constants ++ b.constants
+      case Lam(domain, body) => body.constants ++ domain.ty.constants
+      case Pi(domain, body) => body.constants ++ domain.ty.constants
+      case Let(domain, value, body) => body.constants ++ value.constants ++ domain.ty.constants
+    }
+
   def -->:(that: Expr): Expr =
     Pi(Binding(Name.Anon, that, BinderInfo.Default), this)
 
