@@ -76,28 +76,50 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
       case Let(domain, value, body) => Let(domain.instantiate(subst), value.instantiate(subst), body.instantiate(subst))
     }
 
+  def foreach_(f: Expr => Boolean): Unit =
+    if (f(this)) this match {
+      case LocalConst(of, _) =>
+        of.ty.foreach_(f)
+      case App(a, b) =>
+        a.foreach_(f)
+        b.foreach_(f)
+      case Lam(domain, body) =>
+        domain.ty.foreach_(f)
+        body.foreach_(f)
+      case Pi(domain, body) =>
+        domain.ty.foreach_(f)
+        body.foreach_(f)
+      case Let(domain, value, body) =>
+        domain.ty.foreach_(f)
+        value.foreach_(f)
+        body.foreach_(f)
+      case _: Var | _: Const | _: Sort =>
+    }
+
+  def foreach(f: Expr => Unit): Unit =
+    foreach_ { x => f(x); true }
+
+  private def buildSet[T](f: mutable.Set[T] => Unit): Set[T] = {
+    val set = mutable.Set[T]()
+    f(set)
+    set.toSet
+  }
+
   def univParams: Set[Param] =
-    this match {
-      case Var(_) => Set()
-      case Sort(level) => level.univParams
-      case Const(_, levels) => levels.view.flatMap(_.univParams).toSet
-      case LocalConst(of, _) => of.ty.univParams
-      case App(a, b) => a.univParams union b.univParams
-      case Lam(domain, body) => domain.ty.univParams union body.univParams
-      case Pi(domain, body) => domain.ty.univParams union body.univParams
-      case Let(domain, value, body) => domain.ty.univParams union value.univParams union body.univParams
+    buildSet { ps =>
+      foreach {
+        case Sort(level) => ps ++= level.univParams
+        case Const(_, levels) => ps ++= levels.view.flatMap(_.univParams)
+        case _ =>
+      }
     }
 
   def constants: Set[Name] =
-    this match {
-      case Var(_) => Set()
-      case Sort(_) => Set()
-      case Const(name, _) => Set(name)
-      case LocalConst(_, _) => Set()
-      case App(a, b) => a.constants ++ b.constants
-      case Lam(domain, body) => body.constants ++ domain.ty.constants
-      case Pi(domain, body) => body.constants ++ domain.ty.constants
-      case Let(domain, value, body) => body.constants ++ value.constants ++ domain.ty.constants
+    buildSet { cs =>
+      foreach {
+        case Const(name, _) => cs += name
+        case _ =>
+      }
     }
 
   def -->:(that: Expr): Expr =
