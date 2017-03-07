@@ -155,8 +155,13 @@ class TypeChecker(env: PreEnvironment) {
     val Apps(fn, as) = e
     fn match {
       case Sort(l) => Sort(NLevel.simplify(l))
-      case Lam(_, body) if as.nonEmpty =>
-        whnfCore(Apps(body.instantiate(as.head), as.tail))
+      case Lam(_, _) if as.nonEmpty =>
+        def go(fn: Expr, ctx: List[Expr], as: List[Expr]): Expr =
+          (fn, as) match {
+            case (Lam(_, fn_), a :: as_) => go(fn_, a :: ctx, as_)
+            case _ => Apps(fn.instantiate(0, ctx.toVector), as)
+          }
+        whnfCore(go(fn, Nil, as))
       case Let(_, value, body) =>
         // TODO: zeta
         whnfCore(Apps(body.instantiate(value), as))
@@ -191,21 +196,37 @@ class TypeChecker(env: PreEnvironment) {
       decl.ty.instantiate(decl.univParams.zip(levels).toMap)
     case LocalConst(of, _) =>
       of.ty
-    case App(a, b) =>
-      whnf(infer(a)) match {
-        case Pi(domain, body) =>
-          requireDefEq(domain.ty, infer(b))
-          body.instantiate(b)
-        case a_ =>
-          throw new IllegalArgumentException(s"not a function: $a_")
+    case Apps(fn, as) if as.nonEmpty =>
+      def go(fnt: Expr, as: List[Expr], ctx: List[Expr]): Expr =
+        (fnt, as) match {
+          case (_, Nil) => fnt.instantiate(0, ctx.toVector)
+          case (Pi(dom, body), a :: as_) =>
+            requireDefEq(dom.ty.instantiate(0, ctx.toVector), infer(a))
+            go(body, as_, a :: ctx)
+          case (_, _ :: _) =>
+            whnf(fnt.instantiate(0, ctx.toVector)) match {
+              case fnt_ @ Pi(_, _) => go(fnt_, as, Nil)
+              case _ =>
+                throw new IllegalArgumentException(s"not a function type: $fnt")
+            }
+        }
+      go(infer(fn), as, Nil)
+    case Lam(_, _) =>
+      def go(e: Expr, ctx: List[LocalConst]): Expr = e match {
+        case Lam(dom, body) =>
+          val dom_ = dom.instantiate(0, ctx.toVector)
+          inferUniverseOfType(dom_.ty)
+          Pi(dom, go(body, LocalConst(dom_) :: ctx))
+        case _ =>
+          val ctxVec = ctx.toVector
+          infer(e.instantiate(0, ctxVec)).abstr(0, ctxVec)
       }
-    case Lam(domain, body) =>
-      inferUniverseOfType(domain.ty)
-      val lc = LocalConst(domain)
-      Pi(domain, infer(body.instantiate(lc)).abstr(lc))
-    case Pi(domain, body) =>
-      val lc = LocalConst(domain)
-      Sort(NLevel.simplify(Level.IMax(inferUniverseOfType(domain.ty), inferUniverseOfType(body.instantiate(lc)))))
+      go(e, Nil)
+    case Pis(domains, body) if domains.nonEmpty =>
+      Sort(NLevel.simplify(
+        domains.map(d => inferUniverseOfType(d.of.ty)).
+          foldRight(inferUniverseOfType(body))(Level.IMax)
+      ))
     case Let(domain, value, body) =>
       inferUniverseOfType(domain.ty)
       requireDefEq(domain.ty, infer(value))

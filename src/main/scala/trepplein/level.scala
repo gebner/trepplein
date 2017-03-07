@@ -100,7 +100,7 @@ object NLevel {
       case IMax(a, b) =>
         simplify(b) match {
           case b_ if b_.isZero => Max()
-          case b_ if b_.isNonZero => simplify(a).max(simplify(b))
+          case b_ if b_.isNonZero => simplify(a).max(b_)
           case b_ =>
             simplify(a) match {
               case a_ if a_.isZero => b_

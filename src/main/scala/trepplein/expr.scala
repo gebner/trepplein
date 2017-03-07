@@ -4,7 +4,6 @@ import trepplein.Level._
 
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.runtime.ScalaRunTime
 
 sealed abstract class BinderInfo extends Product {
   def dump = s"BinderInfo.$productPrefix"
@@ -21,7 +20,7 @@ case class Binding(prettyName: Name, ty: Expr, info: BinderInfo) {
     copy(ty = ty.abstr(off, lcs))
 
   def instantiate(off: Int, es: Vector[Expr]): Binding =
-    copy(ty = ty.instantiateReverse(off, es))
+    copy(ty = ty.instantiate(off, es))
 
   def instantiate(subst: Map[Param, Level]): Binding =
     copy(ty = ty.instantiate(subst))
@@ -54,15 +53,15 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
         Let(domain.abstr(off, lcs), value.abstr(off, lcs), body.abstr(off + 1, lcs))
     }
 
-  def instantiate(e: Expr): Expr = instantiateReverse(0, Vector(e))
-  def instantiateReverse(off: Int, es: Vector[Expr]): Expr =
+  def instantiate(e: Expr): Expr = instantiate(0, Vector(e))
+  def instantiate(off: Int, es: Vector[Expr]): Expr =
     this match {
       case _ if varBound <= off => this
       case Var(idx) => if (off <= idx && idx < off + es.size) es(idx - off) else this
-      case App(a, b) => App(a.instantiateReverse(off, es), b.instantiateReverse(off, es))
-      case Lam(domain, body) => Lam(domain.instantiate(off, es), body.instantiateReverse(off + 1, es))
-      case Pi(domain, body) => Pi(domain.instantiate(off, es), body.instantiateReverse(off + 1, es))
-      case Let(domain, value, body) => Let(domain.instantiate(off, es), value.instantiateReverse(off, es), body.instantiateReverse(off + 1, es))
+      case App(a, b) => App(a.instantiate(off, es), b.instantiate(off, es))
+      case Lam(domain, body) => Lam(domain.instantiate(off, es), body.instantiate(off + 1, es))
+      case Pi(domain, body) => Pi(domain.instantiate(off, es), body.instantiate(off + 1, es))
+      case Let(domain, value, body) => Let(domain.instantiate(off, es), value.instantiate(off, es), body.instantiate(off + 1, es))
     }
 
   def instantiate(subst: Map[Param, Level]): Expr =
@@ -204,35 +203,32 @@ object LocalConst {
   }
 }
 
-object Lam {
-  def apply(domain: LocalConst, body: Expr): Expr =
-    Lam(domain.of, body.abstr(domain))
-}
-object Lams {
-  def apply(domains: Iterable[LocalConst])(body: Expr): Expr =
-    domains.foldRight(body)(Lam(_, _))
+trait Binder[T] {
+  def apply(domain: Binding, body: Expr): T
+  def apply(domain: LocalConst, body: Expr): T =
+    apply(domain.of, body.abstr(domain))
 
-  def apply(domains: LocalConst*)(body: Expr): Expr =
-    apply(domains)(body)
+  trait GenericUnapply {
+    def unapply(e: Expr): Option[(Binding, Expr)]
+  }
+  val generic: GenericUnapply
 }
 
-object Pi {
-  def apply(domain: LocalConst, body: Expr): Expr =
-    Pi(domain.of, body.abstr(domain))
-}
-object Pis {
+trait Binders[T <: Expr] {
+  protected val Single: Binder[T]
+
   def apply(domains: Iterable[LocalConst])(body: Expr): Expr =
-    domains.foldRight(body)(Pi(_, _))
+    domains.foldRight(body)(Single.apply)
 
   def apply(domains: LocalConst*)(body: Expr): Expr =
     apply(domains)(body)
 
   def unapply(e: Expr): Some[(List[LocalConst], Expr)] =
     e match {
-      case Pi(dom, expr) =>
+      case Single.generic(dom, expr) =>
         val lc = LocalConst(dom)
-        expr.instantiate(lc) match {
-          case Pis(lcs, head) =>
+        unapply(expr.instantiate(lc)) match {
+          case Some((lcs, head)) =>
             Some((lc :: lcs, head))
         }
       case _ => Some((Nil, e))
@@ -241,11 +237,25 @@ object Pis {
   def drop(n: Int, e: Expr): Expr =
     e match {
       case _ if n == 0 => e
-      case Pi(_, b) => drop(n - 1, b)
+      case Single.generic(_, b) => drop(n - 1, b)
     }
 
   def instantiate(e: Expr, ts: Seq[Expr]): Expr =
-    drop(ts.size, e).instantiateReverse(0, ts.view.reverse.toVector)
+    drop(ts.size, e).instantiate(0, ts.view.reverse.toVector)
+}
+
+object Lam extends Binder[Lam] {
+  val generic: GenericUnapply = { case e: Lam => Lam.unapply(e) case _ => None }
+}
+object Lams extends Binders[Lam] {
+  protected val Single = Lam
+}
+
+object Pi extends Binder[Pi] {
+  val generic: GenericUnapply = { case e: Pi => Pi.unapply(e) case _ => None }
+}
+object Pis extends Binders[Pi] {
+  protected val Single = Pi
 }
 
 object Apps {
