@@ -34,31 +34,40 @@ final case class Definition(name: Name, univParams: Vector[Level.Param],
 
 abstract class Builtin extends Declaration
 
+trait CompiledModification {
+  def check(): Unit
+  def decls: Seq[Declaration]
+}
+
 trait Modification {
   def name: Name
-  def declsFor(env: PreEnvironment): Seq[Declaration]
-  def check(env: PreEnvironment): Unit
+  def compile(env: PreEnvironment): CompiledModification
 }
 object Modification {
   implicit def ofAxiom(axiom: Axiom): Modification = AxiomMod(axiom)
 }
 final case class AxiomMod(ax: Axiom) extends Modification {
   def name: Name = ax.name
-  override def declsFor(env: PreEnvironment): Seq[Declaration] = Seq(ax)
-  override def check(env: PreEnvironment): Unit = ax.check(env)
+
+  def compile(env: PreEnvironment) = new CompiledModification {
+    def check(): Unit = ax.check(env)
+    def decls: Seq[Declaration] = Seq(ax)
+  }
 }
 final case class DefMod(defn: Definition) extends Modification {
   def name: Name = defn.name
 
-  override def declsFor(env: PreEnvironment): Seq[Declaration] = {
-    val height = defn.value.constants.view.
+  val decls = Seq(defn)
+
+  def compile(env: PreEnvironment) = new CompiledModification {
+    val height: Int = defn.value.constants.view.
       flatMap(env.get).
       collect { case d: Definition => d.height }.
       fold(0)(math.max) + 1
 
-    Seq(defn.copy(height = height))
+    def check(): Unit = defn.check(env)
+    def decls: Seq[Declaration] = Seq(defn.copy(height = height))
   }
-  override def check(env: PreEnvironment): Unit = defn.check(env)
 }
 
 case class EnvironmentUpdateError(mod: Modification, msg: String) {
@@ -75,20 +84,22 @@ sealed class PreEnvironment protected (
   def apply(name: Name): Declaration =
     declarations(name)
 
-  private def addDeclsFor(mod: Modification): Map[Name, Declaration] =
-    declarations ++ mod.declsFor(this).view.map(d => d.name -> d)
+  private def addDeclsFor(mod: CompiledModification): Map[Name, Declaration] =
+    declarations ++ mod.decls.view.map(d => d.name -> d)
 
   def addWithFuture(mod: Modification)(implicit executionContext: ExecutionContext): (Future[Option[EnvironmentUpdateError]], PreEnvironment) = {
+    val compiled = mod.compile(this)
     val checkingTask = Future {
-      Try(mod.check(this)).toEither.swap.toOption.
+      Try(compiled.check()).toEither.swap.toOption.
         map(t => EnvironmentUpdateError(mod, t.getMessage))
     }
-    checkingTask -> new PreEnvironment(addDeclsFor(mod), checkingTask :: proofObligations)
+    checkingTask -> new PreEnvironment(addDeclsFor(compiled), checkingTask :: proofObligations)
   }
 
   def addNow(mod: Modification): PreEnvironment = {
-    mod.check(this)
-    new PreEnvironment(addDeclsFor(mod), proofObligations)
+    val compiled = mod.compile(this)
+    compiled.check()
+    new PreEnvironment(addDeclsFor(compiled), proofObligations)
   }
 
   def add(mod: Modification)(implicit executionContext: ExecutionContext): PreEnvironment =

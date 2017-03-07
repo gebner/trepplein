@@ -9,7 +9,7 @@ final case class Elim(name: Name, ty: Expr, ind: InductiveType, univParams: Vect
   kIntro: Option[Name]) extends Builtin
 final case class Intro(name: Name, ty: Expr, ind: InductiveType, univParams: Vector[Level.Param], compRule: Expr) extends Builtin
 
-final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) {
+final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends CompiledModification {
   import indMod._
   val tc = new TypeChecker(env.addNow(inductiveType.asAxiom))
 
@@ -109,19 +109,18 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) {
       yield Intro(n, t, inductiveType, inductiveType.univParams, cr)
 
   val decls: Vector[Declaration] = inductiveType +: introDecls :+ elimDecl
+
+  def check(): Unit = {
+    for (introDecl <- introDecls)
+      require(!introDecl.compRule.hasLocals && !introDecl.compRule.hasVars)
+    val withType = env.addNow(inductiveType.asAxiom)
+    val withIntros = introDecls.foldLeft(withType)((env, i) => { i.asAxiom.check(withType); env.addNow(i.asAxiom) })
+    withIntros.addNow(elimDecl.asAxiom)
+  }
 }
 
 final case class IndMod(inductiveType: InductiveType, numParams: Int, intros: Vector[(Name, Expr)]) extends Modification {
   def name: Name = inductiveType.name
 
-  def declsFor(env: PreEnvironment): Vector[Declaration] = CompiledIndMod(this, env).decls
-
-  override def check(env0: PreEnvironment): Unit = {
-    val compiled = CompiledIndMod(this, env0)
-    for (introDecl <- compiled.introDecls)
-      require(!introDecl.compRule.hasLocals && !introDecl.compRule.hasVars)
-    val withType = env0.addNow(inductiveType.asAxiom)
-    val withIntros = compiled.introDecls.foldLeft(withType)((env, i) => { i.asAxiom.check(withType); env.addNow(i.asAxiom) })
-    withIntros.addNow(compiled.elimDecl.asAxiom)
-  }
+  def compile(env: PreEnvironment) = CompiledIndMod(this, env)
 }

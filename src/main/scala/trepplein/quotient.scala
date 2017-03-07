@@ -48,10 +48,13 @@ case object QuotInd extends Builtin {
 }
 
 case object QuotMod extends Modification {
-  def name = Quot.name
-  override def declsFor(env: PreEnvironment) = Seq(Quot, QuotMk, QuotInd, QuotLift)
-  override def check(env: PreEnvironment): Unit = {
-    // TODO: propext, eq
-    declsFor(env).foldLeft(env)((env, decl) => env.addNow(decl.asAxiom))
+  def name: Name = Quot.name
+  def compile(env: PreEnvironment) = new CompiledModification {
+    val decls = Seq(Quot, QuotMk, QuotInd, QuotLift)
+
+    override def check(): Unit = {
+      // TODO: propext, eq
+      decls.foldLeft(env)((env, decl) => env.addNow(decl.asAxiom))
+    }
   }
 }
