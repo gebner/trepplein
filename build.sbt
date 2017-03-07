@@ -4,6 +4,7 @@ version := "1.0"
 
 scalaVersion := "2.12.1"
 
+libraryDependencies += "org.parboiled" %% "parboiled" % "2.1.4"
 libraryDependencies += "org.specs2" %% "specs2-core" % "3.8.8" % "test"
 
 enablePlugins(JavaAppPackaging)

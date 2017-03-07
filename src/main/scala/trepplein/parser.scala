@@ -1,75 +1,113 @@
 package trepplein
 
-import scala.collection.mutable
+import org.parboiled2._
 
-class TextExportParser {
+import scala.collection.mutable
+import scala.util.{ Failure, Success }
+
+private class TextExportParser {
   val name: mutable.Map[Int, Name] = mutable.Map[Int, Name]()
   val level: mutable.Map[Int, Level] = mutable.Map[Int, Level]()
   val expr: mutable.Map[Int, Expr] = mutable.Map[Int, Expr]()
 
   name(0) = Name.Anon
   level(0) = Level.Zero
+}
 
-  def univParams(is: Seq[String]): Vector[Level.Param] =
-    is.view.map(_.toInt).map(name).map(Level.Param).toVector
+private class LineParser(val textExportParser: TextExportParser, val input: ParserInput) extends Parser {
+  import textExportParser._
 
-  def parseBinderInfo(tok: String): BinderInfo =
-    tok match {
-      case "#BD" => BinderInfo.Default
-      case "#BI" => BinderInfo.Implicit
-      case "#BC" => BinderInfo.InstImplicit
-      case "#BS" => BinderInfo.StrictImplicit
-    }
-  def parseBinding(b: String, n: String, t: String): Binding =
-    Binding(name(n.toInt), expr(t.toInt), parseBinderInfo(b))
+  def int: Rule1[Int] = rule { capture(oneOrMore(CharPredicate.Digit)) ~> ((x: String) => x.toInt) }
+  def long: Rule1[Long] = rule { capture(oneOrMore(CharPredicate.Digit)) ~> ((x: String) => x.toLong) }
 
-  def parseTermDef(toks: Array[String]): Unit =
-    toks match {
-      case Array(i, "#NS", par, rest @ _*) => name(i.toInt) = Name.Str(name(par.toInt), rest.mkString(" "))
-      case Array(i, "#NI", par, num) => name(i.toInt) = Name.Num(name(par.toInt), num.toLong)
+  def rest: Rule1[String] = rule { capture(zeroOrMore(ANY)) }
 
-      case Array(i, "#US", l) => level(i.toInt) = Level.Succ(level(l.toInt))
-      case Array(i, "#UM", l1, l2) => level(i.toInt) = Level.Max(level(l1.toInt), level(l2.toInt))
-      case Array(i, "#UIM", l1, l2) => level(i.toInt) = Level.IMax(level(l1.toInt), level(l2.toInt))
-      case Array(i, "#UP", n) => level(i.toInt) = Level.Param(name(n.toInt))
+  def restNums: Rule1[Seq[Int]] = rule { zeroOrMore(" " ~ int) }
 
-      case Array(i, "#EV", n) => expr(i.toInt) = Var(n.toInt)
-      case Array(i, "#ES", l) => expr(i.toInt) = Sort(level(l.toInt))
-      case Array(i, "#EC", n, ls @ _*) => expr(i.toInt) = Const(name(n.toInt), ls.map(_.toInt).map(level).toVector)
-      case Array(i, "#EA", e1, e2) => expr(i.toInt) = App(expr(e1.toInt), expr(e2.toInt))
-      case Array(i, "#EL", b, n, t, e) => expr(i.toInt) = Lam(parseBinding(b, n, t), expr(e.toInt))
-      case Array(i, "#EP", b, n, t, e) => expr(i.toInt) = Pi(parseBinding(b, n, t), expr(e.toInt))
-      case Array(i, "#EZ", n, t, v, b) => expr(i.toInt) = Let(Binding(name(n.toInt), expr(t.toInt), BinderInfo.Default), expr(v.toInt), expr(b.toInt))
-
-      case Array("#INFIX", _*) => // TODO
-      case Array("#POSTFIX", _*) => // TODO
-      case Array("#PREFIX", _*) => // TODO
+  def binderInfo: Rule1[BinderInfo] =
+    rule {
+      "#BD" ~ push(BinderInfo.Default) |
+        "#BI" ~ push(BinderInfo.Implicit) |
+        "#BC" ~ push(BinderInfo.InstImplicit) |
+        "#BS" ~ push(BinderInfo.StrictImplicit)
     }
 
-  def parseLine(line: String): Option[Modification] =
-    line.split(' ') match {
-      case Array("#AX", n, t, ps @ _*) =>
-        Some(AxiomMod(Axiom(name(n.toInt), univParams(ps), expr(t.toInt))))
-      case Array("#DEF", n, t, v, ps @ _*) =>
-        Some(DefMod(Definition(name(n.toInt), univParams(ps), expr(t.toInt), expr(v.toInt))))
-      case Array("#IND", numParams, n, t, numIntros, rest @ _*) =>
-        val (intros, ps) = rest.splitAt(2 * numIntros.toInt)
-        Some(IndMod(
-          InductiveType(name(n.toInt), univParams(ps), expr(t.toInt)),
-          numParams.toInt, intros.grouped(2).map { case Seq(in, it) => (name(in.toInt), expr(it.toInt)) }.toVector
-        ))
-      case Array("#QUOT") =>
-        Some(QuotMod)
-      case toks =>
-        parseTermDef(toks)
-        None
+  def nameRef: Rule1[Name] = rule { int ~> name }
+  def levelRef: Rule1[Level] = rule { int ~> level }
+  def exprRef: Rule1[Expr] = rule { int ~> expr }
+
+  def nameDef: Rule1[Name] =
+    rule {
+      "#NS " ~ nameRef ~ " " ~ rest ~> Name.Str |
+        "#NI " ~ nameRef ~ " " ~ long ~> Name.Num
+    }
+
+  def levelDef: Rule1[Level] =
+    rule {
+      "#US " ~ levelRef ~> Level.Succ |
+        "#UM " ~ levelRef ~ " " ~ levelRef ~> Level.Max |
+        "#UIM " ~ levelRef ~ " " ~ levelRef ~> Level.IMax |
+        "#UP " ~ nameRef ~> Level.Param
+    }
+
+  def exprDef: Rule1[Expr] =
+    rule {
+      "#EV " ~ int ~> Var |
+        "#ES " ~ levelRef ~> ((l: Level) => Sort(l)) |
+        "#EC " ~ nameRef ~ restNums ~> ((n, ls) => Const(n, ls.map(level).toVector)) |
+        "#EA " ~ exprRef ~ " " ~ exprRef ~> App |
+        "#EL " ~ binderInfo ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((b, n, t, e) => Lam(Binding(n, t, b), e)) |
+        "#EP " ~ binderInfo ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((b, n, t, e) => Pi(Binding(n, t, b), e)) |
+        "#EZ " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((n: Name, t: Expr, v: Expr, b: Expr) => Let(Binding(n, (t), BinderInfo.Default), (v), (b)))
+    }
+
+  def notationDef: Rule0 =
+    rule {
+      "#INFIX " ~ rest ~> ((x: String) => ()) |
+        "#POSTFIX " ~ rest ~> ((x: String) => ()) |
+        "#PREFIX " ~ rest ~> ((x: String) => ())
+    }
+
+  def univParams: Rule1[Vector[Level.Param]] = rule { restNums ~> ((ps: Seq[Int]) => ps.view.map(name).map(Level.Param).toVector) }
+
+  def modification: Rule1[Modification] =
+    rule {
+      "#AX " ~ nameRef ~ " " ~ exprRef ~ univParams ~> ((n, t, ps) => AxiomMod(Axiom(n, ps, t))) |
+        "#DEF " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ univParams ~> ((n, t, v, ps) => DefMod(Definition((n), ps, (t), (v)))) |
+        "#QUOT" ~ push(QuotMod) |
+        "#IND " ~ int ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ int ~ restNums ~> parseInd _
+    }
+
+  def parseInd(numParams: Int, n: Name, t: Expr, numIntros: Int, rest: Seq[Int]): IndMod = {
+    val (intros, ps) = rest.splitAt(2 * numIntros)
+    IndMod(
+      InductiveType(n, ps.view.map(name).map(Level.Param).toVector, t),
+      numParams, intros.grouped(2).map { case Seq(in, it) => (name(in), expr(it)) }.toVector
+    )
+  }
+
+  def line: Rule1[Option[Modification]] =
+    rule {
+      (int ~ " " ~ (nameDef ~> { (i: Int, n: Name) => name(i) = n; None } |
+        exprDef ~> { (i: Int, e: Expr) => expr(i) = e; None } |
+        levelDef ~> { (i: Int, l: Level) => level(i) = l; None }) |
+        notationDef ~ push(None) |
+        modification ~> ((x: Modification) => Some(x))) ~ EOI
     }
 }
 
 object TextExportParser {
   def parse(lines: Stream[String]): Stream[Modification] = {
     val parser = new TextExportParser
-    lines.flatMap(parser.parseLine)
+    lines.flatMap { l =>
+      val lineParser = new LineParser(parser, l)
+      lineParser.line.run() match {
+        case Success(mods) => mods
+        case Failure(error: ParseError) =>
+          throw new IllegalArgumentException(lineParser.formatError(error))
+        case Failure(ex) => throw ex
+      }
+    }
   }
 
   def parseFile(fn: String): Stream[Modification] =
