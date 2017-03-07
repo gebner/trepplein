@@ -49,8 +49,13 @@ final case class AxiomMod(ax: Axiom) extends Modification {
 }
 final case class DefMod(defn: Definition) extends Modification {
   def name: Name = defn.name
+
   override def declsFor(env: PreEnvironment): Seq[Declaration] = {
-    val height = (defn.value.constants.flatMap(env.get).collect { case d: Definition => d.height } + 0).max + 1
+    val height = defn.value.constants.view.
+      flatMap(env.get).
+      collect { case d: Definition => d.height }.
+      fold(0)(math.max) + 1
+
     Seq(defn.copy(height = height))
   }
   override def check(env: PreEnvironment): Unit = defn.check(env)
