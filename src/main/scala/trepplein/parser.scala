@@ -6,12 +6,22 @@ import scala.collection.mutable
 import scala.util.{ Failure, Success }
 
 private class TextExportParser {
-  val name: mutable.Map[Int, Name] = mutable.Map[Int, Name]()
-  val level: mutable.Map[Int, Level] = mutable.Map[Int, Level]()
-  val expr: mutable.Map[Int, Expr] = mutable.Map[Int, Expr]()
+  val name: mutable.ArrayBuffer[Name] = mutable.ArrayBuffer[Name]()
+  val level: mutable.ArrayBuffer[Level] = mutable.ArrayBuffer[Level]()
+  val expr: mutable.ArrayBuffer[Expr] = mutable.ArrayBuffer[Expr]()
 
-  name(0) = Name.Anon
-  level(0) = Level.Zero
+  name += Name.Anon
+  level += Level.Zero
+
+  def write[T](b: mutable.ArrayBuffer[T], i: Int, t: T, default: => T): Unit =
+    b.size match {
+      case `i` => b += t
+      case s if s < i =>
+        b += default
+        write(b, i, t, default)
+      case s if s > i =>
+        b(i) = t
+    }
 }
 
 private class LineParser(val textExportParser: TextExportParser, val input: ParserInput) extends Parser {
@@ -88,9 +98,9 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
 
   def line: Rule1[Option[Modification]] =
     rule {
-      (int ~ " " ~ (nameDef ~> { (i: Int, n: Name) => name(i) = n; None } |
-        exprDef ~> { (i: Int, e: Expr) => expr(i) = e; None } |
-        levelDef ~> { (i: Int, l: Level) => level(i) = l; None }) |
+      (int ~ " " ~ (nameDef ~> { (i: Int, n: Name) => write(name, i, n, Name.Anon); None } |
+        exprDef ~> { (i: Int, e: Expr) => write(expr, i, e, Sort(0)); None } |
+        levelDef ~> { (i: Int, l: Level) => write(level, i, l, Level.Zero); None }) |
         notationDef ~ push(None) |
         modification ~> ((x: Modification) => Some(x))) ~ EOI
     }
