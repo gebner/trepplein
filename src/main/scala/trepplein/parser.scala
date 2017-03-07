@@ -58,7 +58,7 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
         "#EA " ~ exprRef ~ " " ~ exprRef ~> App |
         "#EL " ~ binderInfo ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((b, n, t, e) => Lam(Binding(n, t, b), e)) |
         "#EP " ~ binderInfo ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((b, n, t, e) => Pi(Binding(n, t, b), e)) |
-        "#EZ " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((n: Name, t: Expr, v: Expr, b: Expr) => Let(Binding(n, (t), BinderInfo.Default), (v), (b)))
+        "#EZ " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((n: Name, t: Expr, v: Expr, b: Expr) => Let(Binding(n, t, BinderInfo.Default), v, b))
     }
 
   def notationDef: Rule0 =
@@ -73,7 +73,7 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
   def modification: Rule1[Modification] =
     rule {
       "#AX " ~ nameRef ~ " " ~ exprRef ~ univParams ~> ((n, t, ps) => AxiomMod(Axiom(n, ps, t))) |
-        "#DEF " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ univParams ~> ((n, t, v, ps) => DefMod(Definition((n), ps, (t), (v)))) |
+        "#DEF " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ univParams ~> ((n, t, v, ps) => DefMod(Definition(n, ps, t, v))) |
         "#QUOT" ~ push(QuotMod) |
         "#IND " ~ int ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ int ~ restNums ~> parseInd _
     }
