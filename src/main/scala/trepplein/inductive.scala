@@ -11,7 +11,7 @@ final case class Intro(name: Name, ty: Expr, ind: InductiveType, univParams: Vec
 
 final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) {
   import indMod._
-  val tc = new TypeChecker(env.unchecked.addNow(inductiveType.asAxiom))
+  val tc = new TypeChecker(env.addNow(inductiveType.asAxiom))
 
   def name: Name = inductiveType.name
 

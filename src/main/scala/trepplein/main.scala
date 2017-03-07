@@ -1,7 +1,8 @@
 package trepplein
+
 import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits._
 import scala.concurrent.duration.Duration
+import scala.concurrent.ExecutionContext.Implicits.global
 
 object main {
   def main(args: Array[String]): Unit =
@@ -13,7 +14,7 @@ object main {
           Duration.Inf
         ) match {
           case Left(exs) =>
-            for (ex <- exs) println(ex.getMessage)
+            for (ex <- exs) println(ex)
             sys.exit(1)
           case Right(env) =>
             println(s"checked ${env.declarations.size} declarations")

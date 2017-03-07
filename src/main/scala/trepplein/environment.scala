@@ -2,6 +2,7 @@ package trepplein
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.language.implicitConversions
+import scala.util.Try
 
 abstract class Declaration {
   def name: Name
@@ -55,10 +56,13 @@ final case class DefMod(defn: Definition) extends Modification {
   override def check(env: PreEnvironment): Unit = defn.check(env)
 }
 
+case class EnvironmentUpdateError(mod: Modification, msg: String) {
+  override def toString = s"${mod.name}: $msg"
+}
+
 sealed class PreEnvironment protected (
     val declarations: Map[Name, Declaration],
-    val proofObligations: List[Future[Option[Throwable]]],
-    val checked: Boolean
+    val proofObligations: List[Future[Option[EnvironmentUpdateError]]]
 ) {
 
   def get(name: Name): Option[Declaration] =
@@ -66,43 +70,33 @@ sealed class PreEnvironment protected (
   def apply(name: Name): Declaration =
     declarations(name)
 
+  private def addDeclsFor(mod: Modification): Map[Name, Declaration] =
+    declarations ++ mod.declsFor(this).view.map(d => d.name -> d)
+
+  def addWithFuture(mod: Modification)(implicit executionContext: ExecutionContext): (Future[Option[EnvironmentUpdateError]], PreEnvironment) = {
+    val checkingTask = Future {
+      Try(mod.check(this)).toEither.swap.toOption.
+        map(t => EnvironmentUpdateError(mod, t.getMessage))
+    }
+    checkingTask -> new PreEnvironment(addDeclsFor(mod), checkingTask :: proofObligations)
+  }
+
   def addNow(mod: Modification): PreEnvironment = {
-    if (checked) mod.check(this)
-    new PreEnvironment(
-      declarations ++ mod.declsFor(this).view.map(d => d.name -> d),
-      proofObligations,
-      checked
-    )
+    mod.check(this)
+    new PreEnvironment(addDeclsFor(mod), proofObligations)
   }
 
   def add(mod: Modification)(implicit executionContext: ExecutionContext): PreEnvironment =
-    new PreEnvironment(
-      declarations ++ mod.declsFor(this).view.map(d => d.name -> d),
-      if (checked) Future {
-        try {
-          mod.check(this)
-          None
-        } catch {
-          case t: Throwable =>
-            Some(new Exception(s"${mod.name}: ${t.getMessage}", t))
-        }
-      } :: proofObligations
-      else Nil,
-      checked
-    )
+    addWithFuture(mod)._2
 
-  def unchecked: PreEnvironment = new PreEnvironment(declarations, Nil, checked = false)
-
-  def force(implicit executionContext: ExecutionContext): Future[Either[Seq[Throwable], Environment]] = {
-    require(checked)
+  def force(implicit executionContext: ExecutionContext): Future[Either[Seq[EnvironmentUpdateError], Environment]] =
     Environment.force(this)
-  }
 }
 
 final class Environment private (declarations: Map[Name, Declaration])
-  extends PreEnvironment(declarations, Nil, checked = true)
+  extends PreEnvironment(declarations, Nil)
 object Environment {
-  def force(preEnvironment: PreEnvironment)(implicit executionContext: ExecutionContext): Future[Either[Seq[Throwable], Environment]] =
+  def force(preEnvironment: PreEnvironment)(implicit executionContext: ExecutionContext): Future[Either[Seq[EnvironmentUpdateError], Environment]] =
     Future.sequence(preEnvironment.proofObligations).map(_.flatten).map {
       case Nil => Right(new Environment(preEnvironment.declarations))
       case exs => Left(exs)
