@@ -28,30 +28,28 @@ class TypeChecker(env: PreEnvironment) {
 
   def isDefEq(e1: Expr, e2: Expr): Boolean = checkDefEq(e1, e2).isEmpty
 
-  def defHeight(fn: Expr): Option[Int] =
+  def defHeight(fn: Expr, as: List[Expr]): Int =
     fn match {
       case Const(n, _) =>
-        env.get(n).flatMap {
-          case defn: Definition => Some(defn.height)
-          case _ => None
+        env.get(n) match {
+          case Some(defn: Definition) => defn.height + 1
+          case Some(_) => 1
+          case None => 0
         }
-      case _ => None
+      case _ => 0
     }
 
   private def reduceOneStep(e1: Expr, e2: Expr): Option[(Expr, Expr)] = {
     val Apps(fn1, as1) = e1
     val Apps(fn2, as2) = e2
-    (defHeight(fn1), defHeight(fn2)) match {
-      case (Some(i1), Some(i2)) if i1 > i2 =>
-        val Some(e1_) = reduceOneStep(fn1, as1)
-        Some((e1_, e2))
-      case (Some(i1), Some(i2)) if i1 <= i2 =>
-        val Some(e2_) = reduceOneStep(fn2, as2)
-        Some((e1, e2_))
-      case _ =>
-        reduceOneStep(fn1, as1).map(_ -> e2) orElse
-          reduceOneStep(fn2, as2).map(e1 -> _)
-    }
+
+    def red1 = reduceOneStep(fn1, as1).map(_ -> e2)
+    def red2 = reduceOneStep(fn2, as2).map(e1 -> _)
+
+    if (defHeight(fn1, as1) > defHeight(fn2, as2))
+      red1 orElse red2
+    else
+      red2 orElse red1
   }
 
   private def checkDefEqCore(e1_0: Expr, e2_0: Expr): DefEqRes = {
