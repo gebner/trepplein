@@ -55,7 +55,7 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
   def levelDef: Rule1[Level] =
     rule {
       "#US " ~ levelRef ~> Level.Succ |
-        "#UM " ~ levelRef ~ " " ~ levelRef ~> Level.Max |
+        "#UM " ~ levelRef ~ " " ~ levelRef ~> (Level.Max(_, _)) |
         "#UIM " ~ levelRef ~ " " ~ levelRef ~> Level.IMax |
         "#UP " ~ nameRef ~> Level.Param
     }

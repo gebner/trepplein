@@ -33,6 +33,33 @@ sealed abstract class Level {
       case IMax(a, b) => a.univParams union b.univParams
       case param: Param => Set(param)
     }
+
+  def simplify: Level =
+    this match {
+      case Zero | Param(_) => this
+      case Succ(level) => Succ(level.simplify)
+      case Max(l1, l2) => Max.combining(l1.simplify, l2.simplify)
+      case IMax(a, b) =>
+        b.simplify match {
+          case b_ @ Succ(_) => Max.combining(a.simplify, b_)
+          case Zero => Zero
+          case b_ => IMax(a.simplify, b_)
+        }
+    }
+
+  def <==(that: Level): Boolean = isLeqCore(this.simplify, that.simplify, 0)
+
+  def ===(that: Level): Boolean = {
+    val a = this.simplify
+    val b = that.simplify
+    isLeqCore(a, b, 0) && isLeqCore(b, a, 0)
+  }
+
+  def isZero: Boolean = this <== Zero
+  def isNonZero: Boolean = Succ(Zero) <== this
+
+  def maybeZero: Boolean = !isNonZero
+  def maybeNonZero: Boolean = !isZero
 }
 
 object Level {
@@ -41,6 +68,16 @@ object Level {
   case class Max(a: Level, b: Level) extends Level
   case class IMax(a: Level, b: Level) extends Level
   case class Param(param: Name) extends Level
+
+  object Max {
+    def combining(l1: Level, l2: Level): Level =
+      (l1, l2) match {
+        case (Succ(l1_), Succ(l2_)) => Succ(combining(l1_, l2_))
+        case (Zero, _) => l2
+        case (_, Zero) => l1
+        case (_, _) => Max(l1, l2)
+      }
+  }
 
   implicit def ofNat(n: Int): Level = Offset(n, Zero)
 
@@ -60,45 +97,11 @@ object Level {
       if (i == 0) level else apply(i - 1, Succ(level))
   }
 
-  private def combiningMax(l1: Level, l2: Level): Level =
-    (l1, l2) match {
-      case (Succ(l1_), Succ(l2_)) => Succ(combiningMax(l1_, l2_))
-      case (Zero, _) => l2
-      case (_, Zero) => l1
-      case (_, _) => Max(l1, l2)
-    }
-
-  def simplify(l: Level): Level =
-    l match {
-      case Zero => Zero
-      case Succ(level) => Succ(simplify(level))
-      case Max(l1, l2) =>
-        combiningMax(simplify(l1), simplify(l2))
-      case IMax(a, b) =>
-        simplify(b) match {
-          case b_ @ Succ(_) => combiningMax(simplify(a), b_)
-          case Zero => Zero
-          case b_ => IMax(simplify(a), b_)
-        }
-      case Param(_) => l
-    }
-
-  def isLeq(l1: Level, l2: Level): Boolean = isLeqCore(simplify(l1), simplify(l2), 0)
-
-  def isEq(l1: Level, l2: Level): Boolean = {
-    val l1_ = simplify(l1)
-    val l2_ = simplify(l2)
-    isLeqCore(l1_, l2_, 0) && isLeqCore(l2_, l1_, 0)
-  }
-
-  def isZero(l: Level): Boolean = isLeqCore(simplify(l), Zero, 0)
-  def isNonZero(l: Level): Boolean = isLeqCore(Zero, simplify(l), -1)
-
   /** l1 <= l2 + diff */
   private def isLeqCore(l1: Level, l2: Level, diff: Int): Boolean = {
     def split(p: Param): Boolean =
       Seq(Map(p -> Succ(p)), Map(p -> Zero)).forall(subst =>
-        isLeqCore(simplify(l1.instantiate(subst)), simplify(l2.instantiate(subst)), diff))
+        isLeqCore(l1.instantiate(subst).simplify, l2.instantiate(subst).simplify, diff))
 
     (l1, l2) match {
       // simplification
@@ -121,9 +124,9 @@ object Level {
       case (IMax(_, p @ Param(_)), _) => split(p)
       case (_, IMax(_, p @ Param(_))) => split(p)
       case (IMax(a, IMax(b, c)), _) => isLeqCore(Max(IMax(a, c), IMax(b, c)), l2, diff)
-      case (IMax(a, Max(b, c)), _) => isLeqCore(simplify(Max(IMax(a, b), IMax(a, c))), l2, diff)
+      case (IMax(a, Max(b, c)), _) => isLeqCore(Max(IMax(a, b), IMax(a, c)).simplify, l2, diff)
       case (_, IMax(a, IMax(b, c))) => isLeqCore(l1, Max(IMax(a, c), IMax(b, c)), diff)
-      case (_, IMax(a, Max(b, c))) => isLeqCore(l1, simplify(Max(IMax(a, b), IMax(a, c))), diff)
+      case (_, IMax(a, Max(b, c))) => isLeqCore(l1, Max(IMax(a, b), IMax(a, c)).simplify, diff)
     }
   }
 }

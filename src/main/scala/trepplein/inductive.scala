@@ -40,7 +40,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
         (doms.splitAt(numParams), lvl)
     }
 
-  val elimIntoProp: Boolean = !Level.isNonZero(level) && (intros.size > 1 || intros.exists {
+  val elimIntoProp: Boolean = level.maybeZero && (intros.size > 1 || intros.exists {
     case (_, NormalizedPis(doms, Apps(Const(inductiveType.name, _), introIndTyArgs))) =>
       val arguments = doms.drop(params.size)
       arguments.exists { arg =>
@@ -51,7 +51,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
   val elimLevel: Level = if (elimIntoProp) Level.Zero else Level.Param("l")
   val extraElimLevelParams: Vector[Param] = Vector(elimLevel).collect { case p: Level.Param => p }
 
-  val useDepElim: Boolean = level != Level.Zero
+  val useDepElim: Boolean = level.maybeNonZero
 
   val motiveType: Expr =
     if (useDepElim)
@@ -76,7 +76,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
   }
 
   val kIntro: Option[Name] = intros match {
-    case Vector((n, Pis(ps, _))) if ps.size == numParams && level == Level.Zero => Some(n)
+    case Vector((n, Pis(ps, _))) if ps.size == numParams && level.isZero => Some(n)
     case _ => None
   }
 
