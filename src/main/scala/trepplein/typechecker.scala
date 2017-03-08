@@ -79,7 +79,7 @@ class TypeChecker(env: PreEnvironment) {
         val lc = LocalConst(dom1)
         return reqDefEq(as1.isEmpty && as2.isEmpty, e1, e2) orElse checkDefEq(dom1, dom2) orElse checkDefEq(b1.instantiate(lc), b2.instantiate(lc))
       case (_, _) =>
-        None
+        Some((e1, e2))
     }) match {
       case None => None
       case d @ Some(_) =>
