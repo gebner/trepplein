@@ -24,6 +24,8 @@ case class Binding(prettyName: Name, ty: Expr, info: BinderInfo) {
 
   def instantiate(subst: Map[Param, Level]): Binding =
     copy(ty = ty.instantiate(subst))
+  def instantiateCore(subst: Map[Param, Level]): Binding =
+    copy(ty = ty.instantiateCore(subst))
 
   def dump(implicit lcs: mutable.Map[LocalConst.Name, String]) =
     s"Binding(${prettyName.dump}, ${ty.dump}, ${info.dump})"
@@ -65,16 +67,17 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
     }
 
   def instantiate(subst: Map[Param, Level]): Expr =
+    if (subst.isEmpty) this else instantiateCore(subst)
+  def instantiateCore(subst: Map[Param, Level]): Expr =
     this match {
-      case _ if subst.isEmpty => this
       case v: Var => v
       case Sort(level) => Sort(level.instantiate(subst))
       case Const(name, levels) => Const(name, levels.map(_.instantiate(subst)))
-      case LocalConst(of, name) => LocalConst(of.instantiate(subst), name)
-      case App(a, b) => App(a.instantiate(subst), b.instantiate(subst))
-      case Lam(domain, body) => Lam(domain.instantiate(subst), body.instantiate(subst))
-      case Pi(domain, body) => Pi(domain.instantiate(subst), body.instantiate(subst))
-      case Let(domain, value, body) => Let(domain.instantiate(subst), value.instantiate(subst), body.instantiate(subst))
+      case LocalConst(of, name) => LocalConst(of.instantiateCore(subst), name)
+      case App(a, b) => App(a.instantiateCore(subst), b.instantiateCore(subst))
+      case Lam(domain, body) => Lam(domain.instantiateCore(subst), body.instantiateCore(subst))
+      case Pi(domain, body) => Pi(domain.instantiateCore(subst), body.instantiateCore(subst))
+      case Let(domain, value, body) => Let(domain.instantiateCore(subst), value.instantiateCore(subst), body.instantiateCore(subst))
     }
 
   def foreach_(f: Expr => Boolean): Unit =
@@ -159,7 +162,7 @@ case class Sort(level: Level) extends Expr(varBound = 0, hasLocals = false) {
 }
 
 case class Const(name: Name, levels: Vector[Level]) extends Expr(varBound = 0, hasLocals = false) {
-  override val hashCode: Int = 37 * name.hashCode + levels.hashCode
+  override val hashCode: Int = 37 * name.hashCode
 }
 case class LocalConst(of: Binding, name: LocalConst.Name = new LocalConst.Name) extends Expr(varBound = 0, hasLocals = true) {
   override val hashCode: Int = 4 + 37 * of.hashCode + name.hashCode

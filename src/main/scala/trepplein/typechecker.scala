@@ -121,11 +121,14 @@ class TypeChecker(env: PreEnvironment) {
 
   def reduceOneStep(e: Expr): Option[Expr] =
     e match { case Apps(fn, as) => reduceOneStep(fn, as) }
+  private val deltaCache = mutable.Map[(Name, Vector[Level]), Expr]()
+  private val compRuleCache = mutable.Map[(Name, Vector[Level]), Expr]()
   def reduceOneStep(fn: Expr, as: List[Expr]): Option[Expr] = fn match {
     case Const(name, levels) =>
       env.get(name) match {
         case Some(defn: Definition) =>
-          Some(Apps(defn.value.instantiate(defn.univParams.zip(levels).toMap), as))
+          val expansion = deltaCache.getOrElseUpdate((name, levels), defn.value.instantiate(defn.univParams.zip(levels).toMap))
+          Some(Apps(expansion, as))
         case Some(elim: Elim) =>
           for {
             major <- as.drop(elim.major).headOption
@@ -133,7 +136,7 @@ class TypeChecker(env: PreEnvironment) {
             Intro(_, _, indTy, _, compRule) <- env.get(introC)
             if indTy.name == elim.ind.name
           } yield Apps(
-            compRule.instantiate(elim.univParams.zip(levels).toMap),
+            compRuleCache.getOrElseUpdate((introC, levels), compRule.instantiate(elim.univParams.zip(levels).toMap)),
             as.take(elim.numParams + 1 + elim.numMinors) ++ introArgs.drop(elim.numParams) ++ as.drop(elim.major + 1)
           )
         case Some(QuotLift) if as.size >= 6 =>
