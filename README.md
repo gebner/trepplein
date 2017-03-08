@@ -15,8 +15,6 @@ sbt stage
 
 ### To do
 
- * Verify inductive declarations
- * Memory usage
  * Pretty-printing of checked theorems and used axioms
 
 ### Other checkers

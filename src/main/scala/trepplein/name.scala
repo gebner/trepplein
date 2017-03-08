@@ -55,6 +55,10 @@ object Name {
   def apply(limbs: String*): Name =
     limbs.foldLeft[Name](Anon)(Str)
 
+  def fresh(suggestion: Name, blacklist: Set[Name]): Name =
+    (suggestion #:: Stream.from(0).map(i => Name.Num(suggestion, i): Name)).
+      filterNot(blacklist).head
+
   case object Anon extends Name
   final case class Str(prefix: Name, limb: String) extends Name
   final case class Num(prefix: Name, limb: Long) extends Name
