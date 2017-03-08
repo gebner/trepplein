@@ -27,9 +27,6 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
         case f => Some((Nil, f))
       }
 
-    def normalize(e: Expr): Expr =
-      e match { case NormalizedPis(xs, f) => Pis(xs)(f) }
-
     def instantiate(e: Expr, ts: List[Expr], ctx: List[Expr] = Nil): Expr =
       (e, ts) match {
         case (Pi(_, body), t :: ts_) =>

@@ -35,5 +35,6 @@ class NatTest extends Specification {
     val t = Apps(natAdd, numeral(2), numeral(4))
     tc.checkDefEq(tc.infer(t), nat) must beNone
     tc.checkDefEq(t, numeral(6)) must beNone
+    tc.checkDefEq(t, numeral(7)) must beSome
   }
 }

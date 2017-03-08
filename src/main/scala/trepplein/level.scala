@@ -10,7 +10,6 @@ sealed abstract class Level {
     this match {
       case Zero => "Level.Zero"
       case Succ(level) => s"Level.Succ(${level.dump})"
-      //    case Level.Offset(offset, level) if offset > 0 => s"Level.Offset($offset, ${level.dump})"
       case Max(a, b) => s"Level.Max(${a.dump}, ${b.dump})"
       case IMax(a, b) => s"Level.IMax(${a.dump}, ${b.dump})"
       case Param(param) => s"Level.Param(${param.dump})"

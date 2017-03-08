@@ -233,15 +233,6 @@ trait Binders[T <: Expr] {
         }
       case _ => Some((Nil, e))
     }
-
-  def drop(n: Int, e: Expr): Expr =
-    e match {
-      case _ if n == 0 => e
-      case Single.generic(_, b) => drop(n - 1, b)
-    }
-
-  def instantiate(e: Expr, ts: Seq[Expr]): Expr =
-    drop(ts.size, e).instantiate(0, ts.view.reverse.toVector)
 }
 
 object Lam extends Binder[Lam] {

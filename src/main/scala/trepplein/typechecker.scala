@@ -55,6 +55,7 @@ class TypeChecker(env: PreEnvironment) {
   private def checkDefEqCore(e1_0: Expr, e2_0: Expr): DefEqRes = {
     val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(Transparency.None)
     val e2 @ Apps(fn2, as2) = whnfCore(e2_0)(Transparency.None)
+    if (e1 == e2) return None
     def checkArgs: DefEqRes =
       reqDefEq(as1.size == as2.size, e1, e2) orElse
         (as1, as2).zipped.view.flatMap { case (a1, a2) => checkDefEq(a1, a2) }.headOption
@@ -164,7 +165,10 @@ class TypeChecker(env: PreEnvironment) {
         // TODO: zeta
         whnfCore(Apps(body.instantiate(value), as))
       case Const(_, _) if transparency == Transparency.All =>
-        reduceOneStep(fn, as).map(whnfCore).getOrElse(e)
+        reduceOneStep(fn, as) match {
+          case Some(e_) => whnfCore(e_)
+          case None => e
+        }
       case _ => e
     }
   }
