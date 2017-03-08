@@ -40,7 +40,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
         (doms.splitAt(numParams), lvl)
     }
 
-  val elimIntoProp: Boolean = !NLevel.isNonZero(level) && (intros.size > 1 || intros.exists {
+  val elimIntoProp: Boolean = !Level.isNonZero(level) && (intros.size > 1 || intros.exists {
     case (_, NormalizedPis(doms, Apps(Const(inductiveType.name, _), introIndTyArgs))) =>
       val arguments = doms.drop(params.size)
       arguments.exists { arg =>

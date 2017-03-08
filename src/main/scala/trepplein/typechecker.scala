@@ -5,7 +5,7 @@ import scala.collection.mutable
 class TypeChecker(env: PreEnvironment) {
   private val levelDefEqCache = mutable.Map[(Level, Level), Boolean]()
   def isDefEq(a: Level, b: Level): Boolean =
-    levelDefEqCache.getOrElseUpdate((a, b), NLevel.isEq(a, b))
+    levelDefEqCache.getOrElseUpdate((a, b), Level.isEq(a, b))
 
   def checkDefEq(dom1: Binding, dom2: Binding): DefEqRes =
     checkDefEq(dom1.ty, dom2.ty)
@@ -152,7 +152,7 @@ class TypeChecker(env: PreEnvironment) {
   def whnfCore(e: Expr)(implicit transparency: Transparency = Transparency.All): Expr = {
     val Apps(fn, as) = e
     fn match {
-      case Sort(l) => Sort(NLevel.simplify(l))
+      case Sort(l) => Sort(Level.simplify(l))
       case Lam(_, _) if as.nonEmpty =>
         def go(fn: Expr, ctx: List[Expr], as: List[Expr]): Expr =
           (fn, as) match {
@@ -221,7 +221,7 @@ class TypeChecker(env: PreEnvironment) {
       }
       go(e, Nil)
     case Pis(domains, body) if domains.nonEmpty =>
-      Sort(NLevel.simplify(
+      Sort(Level.simplify(
         domains.map(d => inferUniverseOfType(d.of.ty)).
           foldRight(inferUniverseOfType(body))(Level.IMax)
       ))
