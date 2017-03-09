@@ -18,7 +18,7 @@ final case class Axiom(name: Name, univParams: Vector[Level.Param], ty: Expr) ex
     require(!ty.hasVars)
     require(!ty.hasLocals)
     val tc = new TypeChecker(env)
-    require(tc.infer(ty).isInstanceOf[Sort])
+    tc.inferUniverseOfType(ty)
   }
 }
 final case class Definition(name: Name, univParams: Vector[Level.Param],
@@ -28,7 +28,7 @@ final case class Definition(name: Name, univParams: Vector[Level.Param],
     require(!value.hasVars)
     require(!value.hasLocals)
     val tc = new TypeChecker(env)
-    tc.requireDefEq(tc.infer(value), ty)
+    tc.checkType(value, ty)
   }
 }
 

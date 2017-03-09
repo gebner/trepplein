@@ -7,9 +7,6 @@ class TypeChecker(env: PreEnvironment) {
   def isDefEq(a: Level, b: Level): Boolean =
     levelDefEqCache.getOrElseUpdate((a, b), a === b)
 
-  def checkDefEq(dom1: Binding, dom2: Binding): DefEqRes =
-    checkDefEq(dom1.ty, dom2.ty)
-
   def isProp(s: Expr): Boolean = whnf(s) match {
     case Sort(l) => l.isZero
     case _ => false
@@ -18,9 +15,7 @@ class TypeChecker(env: PreEnvironment) {
   def isProof(p: Expr): Boolean = isProposition(infer(p))
 
   private def isProofIrrelevantEq(e1: Expr, e2: Expr): Boolean =
-    try {
-      isProof(e1) && isProof(e2) && checkDefEq(infer(e1), infer(e2)).isEmpty
-    } catch { case _: Throwable => false }
+    isProof(e1) && isProof(e2)
 
   type DefEqRes = Option[(Expr, Expr)]
   private def reqDefEq(cond: Boolean, e1: Expr, e2: Expr) =
@@ -55,7 +50,6 @@ class TypeChecker(env: PreEnvironment) {
   private def checkDefEqCore(e1_0: Expr, e2_0: Expr): DefEqRes = {
     val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(Transparency.None)
     val e2 @ Apps(fn2, as2) = whnfCore(e2_0)(Transparency.None)
-    if (e1 == e2) return None
     def checkArgs: DefEqRes =
       reqDefEq(as1.size == as2.size, e1, e2) orElse
         (as1, as2).zipped.view.flatMap { case (a1, a2) => checkDefEq(a1, a2) }.headOption
@@ -69,7 +63,7 @@ class TypeChecker(env: PreEnvironment) {
       case (Lam(dom1, b1), Lam(dom2, b2)) =>
         require(as1.isEmpty && as2.isEmpty)
         val lc = LocalConst(dom1)
-        return checkDefEq(dom1, dom2) orElse checkDefEq(b1.instantiate(lc), b2.instantiate(lc))
+        return checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc))
       case (Lam(dom1, _), _) =>
         require(as1.isEmpty)
         return checkDefEqCore(e1, Lam(dom1, App(e2, Var(0))))
@@ -78,7 +72,8 @@ class TypeChecker(env: PreEnvironment) {
         return checkDefEqCore(Lam(dom2, App(e1, Var(0))), e2)
       case (Pi(dom1, b1), Pi(dom2, b2)) =>
         val lc = LocalConst(dom1)
-        return reqDefEq(as1.isEmpty && as2.isEmpty, e1, e2) orElse checkDefEq(dom1, dom2) orElse checkDefEq(b1.instantiate(lc), b2.instantiate(lc))
+        require(as1.isEmpty && as2.isEmpty)
+        return checkDefEq(dom1.ty, dom2.ty) orElse checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc))
       case (_, _) =>
         Some((e1, e2))
     }) match {
@@ -93,8 +88,9 @@ class TypeChecker(env: PreEnvironment) {
   }
 
   private val defEqCache = mutable.Map[(Expr, Expr), DefEqRes]()
+  // requires that e1 and e2 have the same type, or are types
   def checkDefEq(e1: Expr, e2: Expr): DefEqRes =
-    if (e1.eq(e2)) None else defEqCache.getOrElseUpdate((e1, e2), {
+    if (e1.eq(e2) || e1 == e2) None else defEqCache.getOrElseUpdate((e1, e2), {
       checkDefEqCore(e1, e2).filter(_ => !isProofIrrelevantEq(e1, e2))
     })
 
@@ -104,7 +100,7 @@ class TypeChecker(env: PreEnvironment) {
         whnf(infer(major)) match {
           case majorTy @ Apps(Const(_, univParams), as) =>
             val synthIntro = Apps(Const(i, univParams), as.take(elim.numParams))
-            if (isDefEq(infer(synthIntro), majorTy))
+            if (isDefEq(majorTy, infer(synthIntro)))
               synthIntro
             else
               whnf(major)
@@ -176,6 +172,11 @@ class TypeChecker(env: PreEnvironment) {
     }
   }
 
+  def checkType(e: Expr, ty: Expr): Unit = {
+    val inferredTy = infer(e)
+    for ((t_, i_) <- checkDefEq(ty, inferredTy))
+      throw new IllegalArgumentException(s"wrong type: $e : $ty\ninferred type: $inferredTy\n$t_ !=def $i_")
+  }
   def requireDefEq(a: Expr, b: Expr): Unit =
     for ((a_, b_) <- checkDefEq(a, b))
       throw new IllegalArgumentException(s"\n$a_ =def\n$b_")
@@ -206,7 +207,7 @@ class TypeChecker(env: PreEnvironment) {
         (fnt, as) match {
           case (_, Nil) => fnt.instantiate(0, ctx.toVector)
           case (Pi(dom, body), a :: as_) =>
-            requireDefEq(dom.ty.instantiate(0, ctx.toVector), infer(a))
+            checkType(a, dom.ty.instantiate(0, ctx.toVector))
             go(body, as_, a :: ctx)
           case (_, _ :: _) =>
             whnf(fnt.instantiate(0, ctx.toVector)) match {
@@ -232,7 +233,7 @@ class TypeChecker(env: PreEnvironment) {
         foldRight(inferUniverseOfType(body))(Level.IMax).simplify)
     case Let(domain, value, body) =>
       inferUniverseOfType(domain.ty)
-      requireDefEq(domain.ty, infer(value))
+      checkType(value, domain.ty)
       infer(body.instantiate(value))
   })
 }
