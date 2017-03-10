@@ -34,7 +34,7 @@ class TypeChecker(env: PreEnvironment) {
       case _ => 0
     }
 
-  private def reduceOneStep(e1: Expr, e2: Expr): Option[(Expr, Expr)] = {
+  private def reduceOneStep(e1: Expr, e2: Expr)(implicit transparency: Transparency): Option[(Expr, Expr)] = {
     val Apps(fn1, as1) = e1
     val Apps(fn2, as2) = e2
 
@@ -48,8 +48,9 @@ class TypeChecker(env: PreEnvironment) {
   }
 
   private def checkDefEqCore(e1_0: Expr, e2_0: Expr): DefEqRes = {
-    val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(Transparency.None)
-    val e2 @ Apps(fn2, as2) = whnfCore(e2_0)(Transparency.None)
+    val transparency = Transparency(delta = false, iota = false, misc = true)
+    val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(transparency)
+    val e2 @ Apps(fn2, as2) = whnfCore(e2_0)(transparency)
     def checkArgs: DefEqRes =
       reqDefEq(as1.size == as2.size, e1, e2) orElse
         (as1, as2).zipped.view.flatMap { case (a1, a2) => checkDefEq(a1, a2) }.headOption
@@ -79,7 +80,7 @@ class TypeChecker(env: PreEnvironment) {
     }) match {
       case None => None
       case d @ Some(_) =>
-        reduceOneStep(e1, e2) match {
+        reduceOneStep(e1, e2)(Transparency.all) match {
           case Some((e1_, e2_)) =>
             checkDefEqCore(e1_, e2_)
           case None => d
@@ -91,7 +92,7 @@ class TypeChecker(env: PreEnvironment) {
   // requires that e1 and e2 have the same type, or are types
   def checkDefEq(e1: Expr, e2: Expr): DefEqRes =
     if (e1.eq(e2) || e1 == e2) None else defEqCache.getOrElseUpdate((e1, e2), {
-      checkDefEqCore(e1, e2).filter(_ => !isProofIrrelevantEq(e1, e2))
+      if (isProofIrrelevantEq(e1, e2)) None else checkDefEqCore(e1, e2)
     })
 
   private def whnfK(major: Expr, elim: Elim): Expr =
@@ -109,23 +110,24 @@ class TypeChecker(env: PreEnvironment) {
       case None => whnf(major)
     }
 
-  sealed trait Transparency
+  case class Transparency(delta: Boolean, iota: Boolean, misc: Boolean) {
+    def canReduceConstants: Boolean = delta || iota || misc
+  }
   object Transparency {
-    case object None extends Transparency
-    case object All extends Transparency
+    val all = Transparency(delta = true, iota = true, misc = true)
   }
 
-  def reduceOneStep(e: Expr): Option[Expr] =
+  def reduceOneStep(e: Expr)(implicit transparency: Transparency): Option[Expr] =
     e match { case Apps(fn, as) => reduceOneStep(fn, as) }
   private val deltaCache = mutable.Map[(Name, Vector[Level]), Expr]()
   private val compRuleCache = mutable.Map[(Name, Vector[Level]), Expr]()
-  def reduceOneStep(fn: Expr, as: List[Expr]): Option[Expr] = fn match {
+  def reduceOneStep(fn: Expr, as: List[Expr])(implicit transparency: Transparency): Option[Expr] = fn match {
     case Const(name, levels) =>
       env.get(name) match {
-        case Some(defn: Definition) =>
+        case Some(defn: Definition) if transparency.delta =>
           val expansion = deltaCache.getOrElseUpdate((name, levels), defn.value.instantiate(defn.univParams.zip(levels).toMap))
           Some(Apps(expansion, as))
-        case Some(elim: Elim) =>
+        case Some(elim: Elim) if transparency.iota =>
           for {
             major <- as.drop(elim.major).headOption
             Apps(Const(introC, _), introArgs) <- Some(whnfK(major, elim))
@@ -135,7 +137,7 @@ class TypeChecker(env: PreEnvironment) {
             compRuleCache.getOrElseUpdate((introC, levels), compRule.instantiate(elim.univParams.zip(levels).toMap)),
             as.take(elim.numParams + 1 + elim.numMinors) ++ introArgs.drop(elim.numParams) ++ as.drop(elim.major + 1)
           )
-        case Some(QuotLift) if as.size >= 6 =>
+        case Some(QuotLift) if transparency.misc && as.size >= 6 =>
           whnf(as(5)) match {
             case Apps(Const(quotMk, _), mkArgs) if env.get(quotMk).contains(QuotMk) =>
               Some(Apps(App(as(3), mkArgs(2)), as.drop(6)))
@@ -148,8 +150,8 @@ class TypeChecker(env: PreEnvironment) {
   }
 
   private val whnfCache = mutable.Map[Expr, Expr]()
-  def whnf(e: Expr): Expr = whnfCache.getOrElseUpdate(e, whnfCore(e)(Transparency.All))
-  def whnfCore(e: Expr)(implicit transparency: Transparency = Transparency.All): Expr = {
+  def whnf(e: Expr): Expr = whnfCache.getOrElseUpdate(e, whnfCore(e)(Transparency.all))
+  def whnfCore(e: Expr)(implicit transparency: Transparency = Transparency.all): Expr = {
     val Apps(fn, as) = e
     fn match {
       case Sort(l) => Sort(l.simplify)
@@ -163,7 +165,7 @@ class TypeChecker(env: PreEnvironment) {
       case Let(_, value, body) =>
         // TODO: zeta
         whnfCore(Apps(body.instantiate(value), as))
-      case Const(_, _) if transparency == Transparency.All =>
+      case Const(_, _) if transparency.canReduceConstants =>
         reduceOneStep(fn, as) match {
           case Some(e_) => whnfCore(e_)
           case None => e
