@@ -61,9 +61,9 @@ class TypeChecker(env: PreEnvironment) {
         checkArgs
       case (LocalConst(_, i1), LocalConst(_, i2)) if i1 == i2 =>
         checkArgs
-      case (Lam(dom1, b1), Lam(dom2, b2)) =>
+      case (Lam(dom, b1), Lam(_, b2)) =>
         require(as1.isEmpty && as2.isEmpty)
-        val lc = LocalConst(dom1)
+        val lc = LocalConst(dom)
         return checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc))
       case (Lam(dom1, _), _) =>
         require(as1.isEmpty)

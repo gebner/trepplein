@@ -73,9 +73,9 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
 
   def notationDef: Rule0 =
     rule {
-      "#INFIX " ~ rest ~> ((x: String) => ()) |
-        "#POSTFIX " ~ rest ~> ((x: String) => ()) |
-        "#PREFIX " ~ rest ~> ((x: String) => ())
+      "#INFIX " ~ rest ~> ((_: String) => ()) |
+        "#POSTFIX " ~ rest ~> ((_: String) => ()) |
+        "#PREFIX " ~ rest ~> ((_: String) => ())
     }
 
   def univParams: Rule1[Vector[Level.Param]] = rule { restNums ~> ((ps: Seq[Int]) => ps.view.map(name).map(Level.Param).toVector) }
