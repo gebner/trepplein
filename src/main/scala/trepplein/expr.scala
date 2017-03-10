@@ -67,7 +67,7 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
     }
 
   def instantiate(subst: Map[Param, Level]): Expr =
-    if (subst.isEmpty) this else instantiateCore(subst)
+    if (subst.forall(x => x._1 == x._2)) this else instantiateCore(subst)
   def instantiateCore(subst: Map[Param, Level]): Expr =
     this match {
       case v: Var => v
