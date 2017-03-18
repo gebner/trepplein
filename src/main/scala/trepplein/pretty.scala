@@ -4,21 +4,23 @@ import trepplein.BinderInfo._
 import trepplein.Level._
 import Doc._
 
+import scala.collection.mutable
+
 sealed trait Notation
 case class Infix(op: String) extends Notation
 case class Prefix(op: String) extends Notation
 case class Postfix(op: String) extends Notation
 
 class PrettyPrinter(
-    usedNames: Set[Name] = Set(),
     typeChecker: Option[TypeChecker] = None,
     notations: Map[Name, Notation] = Map(),
     hideProofs: Boolean = false,
     hideProofTerms: Boolean = false,
     nestDepth: Int = 2
 ) {
-  val MaxPrio = 1024
+  val usedLCs = mutable.Set[Name]()
 
+  val MaxPrio = 1024
   def nest(doc: Doc): Doc = doc.group.nest(nestDepth)
   case class Parenable(prio: Int, doc: Doc) {
     def parens(newPrio: Int): Doc =
@@ -39,9 +41,9 @@ class PrettyPrinter(
       case Param(param) => Parenable(MaxPrio, pp(param))
     }
 
-  def withFreshName(suggestion: Name): (Name, PrettyPrinter) = {
+  def mkFreshName(suggestion: Name): Name = {
     def alreadyUsed(n: Name): Boolean =
-      usedNames(n) || typeChecker.exists(_.env.declarations.contains(n))
+      usedLCs(n) || typeChecker.exists(_.env.declarations.contains(n))
 
     val sanitizedSuggestion = suggestion.toString.
       filter(_.isLetterOrDigit).
@@ -55,16 +57,17 @@ class PrettyPrinter(
       if (alreadyUsed(n)) findUnused(base, idx + 1) else n
     }
 
-    val fresh: Name =
-      if (alreadyUsed(sanitizedSuggestion)) findUnused(sanitizedSuggestion, 0)
-      else sanitizedSuggestion
+    val fresh: Name = if (alreadyUsed(sanitizedSuggestion)) findUnused(sanitizedSuggestion, 0)
+    else sanitizedSuggestion
 
-    (fresh, new PrettyPrinter(usedNames + fresh, typeChecker, notations, hideProofs, hideProofTerms, nestDepth))
+    usedLCs += fresh
+    fresh
   }
 
-  def withFreshLC(suggestion: LocalConst): (LocalConst, PrettyPrinter) = {
-    val (fresh, this_) = withFreshName(suggestion.of.prettyName)
-    (suggestion.copy(of = suggestion.of.copy(prettyName = fresh)), this_)
+  def withFreshLC[T](suggestion: LocalConst)(f: LocalConst => T): T = {
+    val fresh = mkFreshName(suggestion.of.prettyName)
+    try f(suggestion.copy(of = suggestion.of.copy(prettyName = fresh)))
+    finally usedLCs -= fresh
   }
 
   def pp(binding: Binding): Doc = {
@@ -107,19 +110,22 @@ class PrettyPrinter(
         Parenable(MaxPrio, "@" <> pp(name) <> univParams)
       case LocalConst(of, _) => Parenable(MaxPrio, pp(of.prettyName))
       case Lam(domain, body) =>
-        val (lc, this_) = withFreshLC(LocalConst(domain))
-        Parenable(0, ("λ" <+> pp(lc.of) <> "," </>
-          this_.pp(body.instantiate(lc)).parens(0)).group)
+        withFreshLC(LocalConst(domain)) { lc =>
+          Parenable(0, ("λ" <+> pp(lc.of) <> "," </>
+            pp(body.instantiate(lc)).parens(0)).group)
+        }
       case Pi(domain, body) if !body.hasVars && domain.info == BinderInfo.Default =>
         Parenable(24, (pp(domain.ty).parens(25) <+> "→" </> pp(body).parens(24)).group)
       case Pi(domain, body) =>
-        val (lc, this_) = withFreshLC(LocalConst(domain))
-        Parenable(0, ("∀" <+> pp(lc.of) <> "," </>
-          this_.pp(body.instantiate(lc)).parens(0)).group)
+        withFreshLC(LocalConst(domain)) { lc =>
+          Parenable(0, ("∀" <+> pp(lc.of) <> "," </>
+            pp(body.instantiate(lc)).parens(0)).group)
+        }
       case Let(domain, value, body) =>
-        val (lc, this_) = withFreshLC(LocalConst(domain))
-        Parenable(0, (nest("let" <+> pp(lc.of) <+> ":=" </> pp(value).parens(0).group <+> "in") </>
-          this_.pp(body.instantiate(lc)).parens(0)).group)
+        withFreshLC(LocalConst(domain)) { lc =>
+          Parenable(0, (nest("let" <+> pp(lc.of) <+> ":=" </> pp(value).parens(0).group <+> "in") </>
+            pp(body.instantiate(lc)).parens(0)).group)
+        }
       case App(_, _) =>
         def go(e: Expr, as: List[Expr]): (Expr, List[Expr]) =
           e match {
