@@ -18,7 +18,7 @@ class PrettyPrinter(
 ) {
   val MaxPrio = 1024
 
-  def nest(doc: Doc): Doc = Nest(nestDepth, Group(doc))
+  def nest(doc: Doc): Doc = doc.group.nest(nestDepth)
   case class Parenable(prio: Int, doc: Doc) {
     def parens(newPrio: Int): Doc =
       if (newPrio > prio) "(" <> doc <> ")" else doc
@@ -50,13 +50,13 @@ class PrettyPrinter(
   }
 
   def pp(binding: Binding): Doc = {
-    def bare = pp(binding.prettyName) <+> ":" </> pp(binding.ty).parens(1)
-    binding.info match {
+    def bare = pp(binding.prettyName) <+> ":" </> pp(binding.ty).parens(1).group
+    nest(binding.info match {
       case Default => bare
       case Implicit => "{" <> bare <> "}"
       case StrictImplicit => "{{" <> bare <> "}}"
       case InstImplicit => "[" <> bare <> "]"
-    }
+    })
   }
 
   def isImplicit(fn: Expr): Boolean =
@@ -73,7 +73,7 @@ class PrettyPrinter(
     }
 
   def pp(us: Traversable[Level]): Doc =
-    Group("{" <> stack(us.map(pp).map(_.parens(0))) <> "}")
+    ("{" <> stack(us.map(pp).map(_.parens(0))) <> "}").group
 
   def pp(e: Expr): Parenable =
     e match {
@@ -85,29 +85,29 @@ class PrettyPrinter(
       case Const(name, _) if typeChecker.exists(_.env.get(name).nonEmpty) =>
         Parenable(MaxPrio, pp(name))
       case Const(name, levels) =>
-        val univParams = if (levels.isEmpty) Text("") else ".{" <> pp(levels) <> "}"
-        Parenable(MaxPrio, Group("@" <> pp(name) <> univParams))
+        val univParams: Doc = if (levels.isEmpty) "" else ".{" <> pp(levels) <> "}"
+        Parenable(MaxPrio, "@" <> pp(name) <> univParams)
       case LocalConst(of, _) => Parenable(MaxPrio, pp(of.prettyName))
       case Lam(domain, body) =>
         val (lc, this_) = withFreshLC(LocalConst(domain))
-        Parenable(0, "λ" <+> nest(pp(lc.of.prettyName) <+> ":" </> pp(lc.of.ty).parens(1)) <> "," </>
-          this_.pp(body.instantiate(lc)).parens(0))
+        Parenable(0, ("λ" <+> pp(lc.of) <> "," </>
+          this_.pp(body.instantiate(lc)).parens(0)).group)
       case Pi(domain, body) if !body.hasVars && domain.info == BinderInfo.Default =>
-        Parenable(24, pp(domain.ty).parens(25) <+> "→" </> pp(body).parens(24))
+        Parenable(24, (pp(domain.ty).parens(25) <+> "→" </> pp(body).parens(24)).group)
       case Pi(domain, body) =>
         val (lc, this_) = withFreshLC(LocalConst(domain))
-        Parenable(0, "∀" <+> nest(pp(lc.of.prettyName) <+> ":" </> pp(lc.of.ty).parens(1)) <> "," </>
-          this_.pp(body.instantiate(lc)).parens(0))
+        Parenable(0, ("∀" <+> pp(lc.of) <> "," </>
+          this_.pp(body.instantiate(lc)).parens(0)).group)
       case Let(domain, value, body) =>
         val (lc, this_) = withFreshLC(LocalConst(domain))
-        Parenable(0, "let" <+> nest(pp(lc.of.prettyName) <+> ":=" </> pp(value).parens(0) <+> "in") </>
-          this_.pp(body.instantiate(lc)).parens(0))
+        Parenable(0, (nest("let" <+> pp(lc.of) <+> ":=" </> pp(value).parens(0).group <+> "in") </>
+          this_.pp(body.instantiate(lc)).parens(0)).group)
       case App(_, _) =>
         def go(e: Expr): Doc =
           e match {
             case App(fn, _) if isImplicit(fn) => go(fn)
-            case App(fn, a) => go(fn) </> pp(a).parens(MaxPrio)
-            case fn => pp(fn).parens(MaxPrio - 1)
+            case App(fn, a) => go(fn) </> pp(a).parens(MaxPrio).group
+            case fn => pp(fn).parens(MaxPrio - 1).group
           }
         Parenable(MaxPrio - 1, nest(go(e)))
     }
@@ -118,16 +118,16 @@ class PrettyPrinter(
         val ups: Doc = if (univParams.isEmpty) "" else " " <> pp(univParams)
         val isProp = typeChecker.exists(_.isProposition(ty))
         val cmd = if (isProp) "lemma" else "def"
-        val ppVal: Doc = if (isProp && hideProofs) "_" else pp(value).parens(0)
-        cmd <> ups <+> nest(pp(name) <+> ":" </> pp(ty).parens(0) <+> ":=") </> ppVal <> Line
+        val ppVal: Doc = if (isProp && hideProofs) "_" else pp(value).parens(0).group
+        cmd <> ups <+> nest(pp(name) <+> ":" </> pp(ty).parens(0).group <+> ":=") </> ppVal <> line
       case Axiom(name, univParams, ty) =>
-        val ups = if (univParams.isEmpty) Text("") else " " <> pp(univParams)
-        "axiom" <> ups <+> nest(pp(name) <+> ":" </> pp(ty).parens(0)) <> Line
+        val ups: Doc = if (univParams.isEmpty) "" else " " <> pp(univParams)
+        "axiom" <> ups <+> nest(pp(name) <+> ":" </> pp(ty).parens(0).group) <> line
       case _: Builtin =>
         "@[builtin]" <+> pp(decl.asAxiom)
     }
 }
 
 object pretty {
-  def apply(e: Expr): String = Group(new PrettyPrinter().pp(e).doc).render(lineWidth = 80)
+  def apply(e: Expr): String = new PrettyPrinter().pp(e).doc.group.render(lineWidth = 80)
 }

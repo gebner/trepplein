@@ -23,7 +23,7 @@ class LibraryPrinter(env: PreEnvironment, out: String => Unit,
       }
     }
 
-    out((pp.pp(decl) <> Doc.Line).render(lineWidth))
+    out((pp.pp(decl) <> Doc.line).render(lineWidth))
   })
 
   private val axiomsChecked = mutable.Map[Name, Unit]()
@@ -47,12 +47,12 @@ class LibraryPrinter(env: PreEnvironment, out: String => Unit,
 object main {
   def main(args: Array[String]): Unit =
     args match {
-      case Array(fn, thms @ _*) =>
+      case Array(fn) =>
         val preEnv = TextExportParser.parseFile(fn)
           .foldLeft[PreEnvironment](Environment.default)(_.add(_))
 
-        val printer = new LibraryPrinter(preEnv, print)
-        thms.foreach(printer.handleArg(_))
+        val printer = new LibraryPrinter(preEnv, print, hideProofs = true)
+        preEnv.declarations.keys.foreach(printer.handleArg)
 
         Await.result(preEnv.force, Duration.Inf) match {
           case Left(exs) =>
