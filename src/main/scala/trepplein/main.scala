@@ -7,7 +7,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 
 class LibraryPrinter(env: PreEnvironment, out: String => Unit,
     hideProofs: Boolean = true, lineWidth: Int = 80,
-    printDependencies: Boolean = false) {
+    printDependencies: Boolean = true) {
   private val declsPrinted = mutable.Map[Name, Unit]()
   def printDecl(name: Name): Unit = declsPrinted.getOrElseUpdate(name, {
     val tc = new TypeChecker(env, unsafeUnchecked = true)
@@ -17,7 +17,7 @@ class LibraryPrinter(env: PreEnvironment, out: String => Unit,
     if (printDependencies) {
       decl.ty.constants.foreach(printDecl)
       decl match {
-        case decl: Definition if !tc.isProposition(decl.ty) =>
+        case decl: Definition if !hideProofs || !tc.isProposition(decl.ty) =>
           decl.value.constants.foreach(printDecl)
         case _ =>
       }

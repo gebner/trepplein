@@ -14,6 +14,7 @@ class PrettyPrinter(
     typeChecker: Option[TypeChecker] = None,
     notations: Map[Name, Notation] = Map(),
     hideProofs: Boolean = false,
+    hideProofTerms: Boolean = false,
     nestDepth: Int = 2
 ) {
   val MaxPrio = 1024
@@ -38,11 +39,28 @@ class PrettyPrinter(
       case Param(param) => Parenable(MaxPrio, pp(param))
     }
 
-  def withFreshName(suggestion: Name): (Name, PrettyPrinter) =
-    if (suggestion == Name.Anon) withFreshName(Name("a")) else {
-      val fresh = (suggestion #:: Stream.from(0).map(Name.Num(suggestion, _): Name)).filterNot(usedNames).head
-      (fresh, new PrettyPrinter(usedNames + fresh, typeChecker))
+  def withFreshName(suggestion: Name): (Name, PrettyPrinter) = {
+    def alreadyUsed(n: Name): Boolean =
+      usedNames(n) || typeChecker.exists(_.env.declarations.contains(n))
+
+    val sanitizedSuggestion = suggestion.toString.
+      filter(_.isLetterOrDigit).
+      dropWhile(_.isDigit) match {
+        case "" => "a"
+        case s => s
+      }
+
+    def findUnused(base: String, idx: Int): Name = {
+      val n = Name(base + '_' + idx)
+      if (alreadyUsed(n)) findUnused(base, idx + 1) else n
     }
+
+    val fresh: Name =
+      if (alreadyUsed(sanitizedSuggestion)) findUnused(sanitizedSuggestion, 0)
+      else sanitizedSuggestion
+
+    (fresh, new PrettyPrinter(usedNames + fresh, typeChecker, notations, hideProofs, hideProofTerms, nestDepth))
+  }
 
   def withFreshLC(suggestion: LocalConst): (LocalConst, PrettyPrinter) = {
     val (fresh, this_) = withFreshName(suggestion.of.prettyName)
@@ -77,7 +95,7 @@ class PrettyPrinter(
 
   def pp(e: Expr): Parenable =
     e match {
-      case _ if hideProofs && typeChecker.exists(_.isProof(e)) => Parenable(MaxPrio, "_")
+      case _ if hideProofTerms && typeChecker.exists(_.isProof(e)) => Parenable(MaxPrio, "_")
       case Var(idx) => Parenable(MaxPrio, s"#$idx")
       case Sort(level) if level.isZero => Parenable(MaxPrio, "Prop")
       case Sort(Succ(level)) => Parenable(MaxPrio, "Type" <+> pp(level).parens(MaxPrio))
@@ -103,13 +121,15 @@ class PrettyPrinter(
         Parenable(0, (nest("let" <+> pp(lc.of) <+> ":=" </> pp(value).parens(0).group <+> "in") </>
           this_.pp(body.instantiate(lc)).parens(0)).group)
       case App(_, _) =>
-        def go(e: Expr): Doc =
+        def go(e: Expr, as: List[Expr]): (Expr, List[Expr]) =
           e match {
-            case App(fn, _) if isImplicit(fn) => go(fn)
-            case App(fn, a) => go(fn) </> pp(a).parens(MaxPrio).group
-            case fn => pp(fn).parens(MaxPrio - 1).group
+            case App(hd, _) if isImplicit(hd) => go(hd, as)
+            case App(hd, a) => go(hd, a :: as)
+            case hd => (hd, as)
           }
-        Parenable(MaxPrio - 1, nest(go(e)))
+        val (fn, as) = go(e, Nil)
+        if (as.isEmpty) pp(fn) else
+          Parenable(MaxPrio - 1, nest(stack(pp(fn).parens(MaxPrio - 1).group :: as.map(pp(_).parens(MaxPrio).group))))
     }
 
   def pp(decl: Declaration): Doc =
@@ -124,7 +144,7 @@ class PrettyPrinter(
         val ups: Doc = if (univParams.isEmpty) "" else " " <> pp(univParams)
         "axiom" <> ups <+> nest(pp(name) <+> ":" </> pp(ty).parens(0).group) <> line
       case _: Builtin =>
-        "@[builtin]" <+> pp(decl.asAxiom)
+        "/- builtin -/" <+> pp(decl.asAxiom)
     }
 }
 
