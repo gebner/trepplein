@@ -2,7 +2,28 @@ package trepplein
 
 import scala.collection.mutable
 
-class TypeChecker(env: PreEnvironment) {
+class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false) {
+  def shouldCheck: Boolean = !unsafeUnchecked
+
+  object NormalizedPis {
+    def unapply(e: Expr): Some[(List[LocalConst], Expr)] =
+      whnf(e) match {
+        case Pis(lcs1, f) if lcs1.nonEmpty =>
+          val NormalizedPis(lcs2, g) = f
+          Some((lcs1 ::: lcs2, g))
+        case f => Some((Nil, f))
+      }
+
+    def instantiate(e: Expr, ts: List[Expr], ctx: List[Expr] = Nil): Expr =
+      (e, ts) match {
+        case (Pi(_, body), t :: ts_) =>
+          instantiate(body, ts_, t :: ctx)
+        case (_, _ :: _) =>
+          instantiate(whnf(e).ensuring(_.isInstanceOf[Pi]), ts, ctx)
+        case (_, Nil) => e.instantiate(0, ctx.toVector)
+      }
+  }
+
   private val levelDefEqCache = mutable.Map[(Level, Level), Boolean]()
   def isDefEq(a: Level, b: Level): Boolean =
     levelDefEqCache.getOrElseUpdate((a, b), a === b)
@@ -209,7 +230,7 @@ class TypeChecker(env: PreEnvironment) {
         (fnt, as) match {
           case (_, Nil) => fnt.instantiate(0, ctx.toVector)
           case (Pi(dom, body), a :: as_) =>
-            checkType(a, dom.ty.instantiate(0, ctx.toVector))
+            if (shouldCheck) checkType(a, dom.ty.instantiate(0, ctx.toVector))
             go(body, as_, a :: ctx)
           case (_, _ :: _) =>
             whnf(fnt.instantiate(0, ctx.toVector)) match {
@@ -223,7 +244,7 @@ class TypeChecker(env: PreEnvironment) {
       def go(e: Expr, ctx: List[LocalConst]): Expr = e match {
         case Lam(dom, body) =>
           val dom_ = dom.instantiate(0, ctx.toVector)
-          inferUniverseOfType(dom_.ty)
+          if (shouldCheck) inferUniverseOfType(dom_.ty)
           Pi(dom, go(body, LocalConst(dom_) :: ctx))
         case _ =>
           val ctxVec = ctx.toVector
@@ -234,8 +255,8 @@ class TypeChecker(env: PreEnvironment) {
       Sort(domains.map(d => inferUniverseOfType(d.of.ty)).
         foldRight(inferUniverseOfType(body))(Level.IMax).simplify)
     case Let(domain, value, body) =>
-      inferUniverseOfType(domain.ty)
-      checkType(value, domain.ty)
+      if (shouldCheck) inferUniverseOfType(domain.ty)
+      if (shouldCheck) checkType(value, domain.ty)
       infer(body.instantiate(value))
   })
 }

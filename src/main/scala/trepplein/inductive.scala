@@ -12,30 +12,12 @@ final case class Intro(name: Name, ty: Expr, ind: InductiveType, univParams: Vec
 final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends CompiledModification {
   import indMod._
   val tc = new TypeChecker(env.addNow(inductiveType.asAxiom))
+  import tc.NormalizedPis
 
   def name: Name = inductiveType.name
 
   def univParams: Vector[Param] = inductiveType.univParams
   val indTy = Const(inductiveType.name, univParams)
-
-  object NormalizedPis {
-    def unapply(e: Expr): Some[(List[LocalConst], Expr)] =
-      tc.whnf(e) match {
-        case Pis(lcs1, f) if lcs1.nonEmpty =>
-          val NormalizedPis(lcs2, g) = f
-          Some((lcs1 ::: lcs2, g))
-        case f => Some((Nil, f))
-      }
-
-    def instantiate(e: Expr, ts: List[Expr], ctx: List[Expr] = Nil): Expr =
-      (e, ts) match {
-        case (Pi(_, body), t :: ts_) =>
-          instantiate(body, ts_, t :: ctx)
-        case (_, _ :: _) =>
-          instantiate(tc.whnf(e).ensuring(_.isInstanceOf[Pi]), ts, ctx)
-        case (_, Nil) => e.instantiate(0, ctx.toVector)
-      }
-  }
 
   val ((params, indices), level) =
     inductiveType.ty match {

@@ -63,5 +63,5 @@ object Name {
   final case class Str(prefix: Name, limb: String) extends Name
   final case class Num(prefix: Name, limb: Long) extends Name
 
-  implicit def ofString(s: String): Name = Str(Anon, s)
+  implicit def ofString(s: String): Name = Name(s.split("\\."): _*)
 }
