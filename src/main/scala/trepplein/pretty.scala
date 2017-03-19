@@ -203,11 +203,11 @@ class PrettyPrinter(
           case (fn @ Const(n, _), as) =>
             notations.get(n) match {
               case Some(Prefix(_, prio, op)) if as.size == 1 =>
-                Parenable(prio - 1, op <> pp(as(0)).parens(prio))
+                Parenable(prio - 1, (op <> zeroWidthLine).group <> pp(as(0)).parens(prio))
               case Some(Postfix(_, prio, op)) if as.size == 1 =>
-                Parenable(prio - 1, pp(as(0)).parens(prio) <> op)
+                Parenable(prio - 1, (pp(as(0)).parens(prio) <> zeroWidthLine <> op).group)
               case Some(Infix(_, prio, op)) if as.size == 2 =>
-                Parenable(prio - 1, pp(as(0)).parens(prio) <> op <> pp(as(1)).parens(prio))
+                Parenable(prio - 1, nest(pp(as(0)).parens(prio) <> op <> zeroWidthLine <> pp(as(1)).parens(prio)))
               case _ =>
                 printDefault(fn, as)
             }

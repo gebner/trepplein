@@ -5,8 +5,8 @@ import scala.language.implicitConversions
 
 sealed trait Doc {
   def <>(that: Doc): Doc = Concat(this, that)
-  def <+>(that: Doc): Doc = this <> Text(" ") <> that
-  def </>(that: Doc): Doc = this <> Line <> that
+  def <+>(that: Doc): Doc = this <> " " <> that
+  def </>(that: Doc): Doc = this <> line <> that
   def nest(i: Int): Doc = Nest(i, this)
   def group: Doc = Group(this)
 
@@ -14,18 +14,18 @@ sealed trait Doc {
     case Concat(a, b) => a.flatSize + b.flatSize
     case Nest(_, d) => d.flatSize
     case Text(t) => t.length
-    case Line => 1
+    case Line(orElse) => orElse.size
     case Group(a) => a.flatSize
   }
   private val containsLine: Boolean = this match {
-    case Line => true
+    case Line(_) => true
     case Concat(a, b) => a.containsLine || b.containsLine
     case Nest(_, d) => d.containsLine
     case Text(_) => false
     case Group(a) => a.containsLine
   }
   private val distToFirstLine: Int = this match {
-    case Line => 0
+    case Line(_) => 0
     case Concat(a, b) => a.distToLine(b.distToFirstLine)
     case Nest(_, d) => d.distToFirstLine
     case Text(t) => t.length
@@ -46,12 +46,12 @@ sealed trait Doc {
           go(a, nest + i, flatMode, distToNextLine)
         case Text(t) =>
           out ++= t
-        case Line if !flatMode =>
+        case Line(_) if !flatMode =>
           out += '\n'
           endOfLine = out.size + lineWidth
           for (_ <- 0 until nest) out += ' '
-        case Line if flatMode =>
-          out += ' '
+        case Line(orElse) if flatMode =>
+          out ++= orElse
         case Group(a) =>
           go(a, nest, flatMode || out.size + a.flatSize + distToNextLine <= endOfLine, distToNextLine)
       }
@@ -65,17 +65,18 @@ object Doc {
   private case class Concat(a: Doc, b: Doc) extends Doc
   private case class Nest(i: Int, d: Doc) extends Doc
   private case class Text(t: String) extends Doc
-  private case object Line extends Doc
+  private case class Line(orElse: String) extends Doc
   private case class Group(a: Doc) extends Doc
 
-  def line: Doc = Line
+  def line: Doc = Line(" ")
+  def zeroWidthLine: Doc = Line("")
   implicit def text(t: String): Doc = Text(t)
 
   def sep(docs: Traversable[Doc], by: Doc): Doc =
     docs.reduceLeftOption(_ <> by <> _).getOrElse(Text(""))
 
   def spread(cols: Traversable[Doc]): Doc = sep(cols, Text(" "))
-  def stack(lines: Traversable[Doc]): Doc = sep(lines, Line)
+  def stack(lines: Traversable[Doc]): Doc = sep(lines, line)
 
   def wordwrap(ds: Iterable[Doc]): Doc =
     ds.view.zipWithIndex.
