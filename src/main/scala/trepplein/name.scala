@@ -44,6 +44,8 @@ sealed abstract class Name extends Product {
     buf.result()
   }
 
+  def isAnon: Boolean = this == Anon
+
   def dump: String =
     this match {
       case Anon => "Name.Anon"

@@ -18,7 +18,7 @@ class PrettyPrinter(
     hideProofTerms: Boolean = false,
     nestDepth: Int = 2
 ) {
-  val usedLCs = mutable.Set[Name]()
+  val usedLCs: mutable.Set[Name] = mutable.Set[Name]()
 
   val MaxPrio = 1024
   def nest(doc: Doc): Doc = doc.group.nest(nestDepth)
@@ -70,8 +70,11 @@ class PrettyPrinter(
     finally usedLCs -= fresh
   }
 
+  def ppBareBinder(binding: Binding): Doc =
+    pp(binding.prettyName) <+> ":" </> pp(binding.ty).parens(1).group
+
   def pp(binding: Binding): Doc = {
-    def bare = pp(binding.prettyName) <+> ":" </> pp(binding.ty).parens(1).group
+    def bare = ppBareBinder(binding)
     nest(binding.info match {
       case Default => bare
       case Implicit => "{" <> bare <> "}"
@@ -93,8 +96,74 @@ class PrettyPrinter(
       case _ => false
     }
 
-  def pp(us: Traversable[Level]): Doc =
-    ("{" <> stack(us.map(pp).map(_.parens(0))) <> "}").group
+  def pp(us: Iterable[Level]): Doc =
+    ("{" <> wordwrap(us.map(pp).map(_.parens(0))) <> "}").group
+
+  case class ParsedBinder(isPi: Boolean, occursInBody: Boolean, isAnon: Boolean, lc: LocalConst) {
+    def isImp: Boolean = isPi && info == Default && isAnon && !occursInBody
+    def isForall: Boolean = isPi && !isImp
+    def isLambda: Boolean = !isPi
+    def info: BinderInfo = lc.of.info
+    def ty: Expr = lc.of.ty
+    def name: Name = lc.of.prettyName
+  }
+  type ParsedBinders = List[ParsedBinder]
+  def parseBinders[T](e: Expr)(f: (ParsedBinders, Expr) => T): T = {
+    def decompose(e: Expr, ctx: ParsedBinders): T =
+      e match {
+        case Pi(dom, body) =>
+          val lcName = mkFreshName(dom.prettyName)
+          val lc = LocalConst(dom.copy(prettyName = lcName, ty = dom.ty.instantiate(0, ctx.view.map(_.lc).toVector)))
+          decompose(body, ParsedBinder(isPi = true, isAnon = dom.prettyName.isAnon, occursInBody = body.hasVar(0), lc = lc) :: ctx)
+        case Lam(dom, body) =>
+          val lcName = mkFreshName(dom.prettyName)
+          val lc = LocalConst(dom.copy(prettyName = lcName, ty = dom.ty.instantiate(0, ctx.view.map(_.lc).toVector)))
+          decompose(body, ParsedBinder(isPi = false, isAnon = dom.prettyName.isAnon, occursInBody = body.hasVar(0), lc = lc) :: ctx)
+        case _ =>
+          try f(ctx.reverse, e.instantiate(0, ctx.view.map(_.lc).toVector))
+          finally usedLCs --= ctx.view.map(_.lc.of.prettyName)
+      }
+    decompose(e, Nil)
+  }
+
+  private def splitListWhile[T](xs: List[T])(pred: T => Boolean): (List[T], List[T]) =
+    xs match {
+      case x :: rest if pred(x) =>
+        val (part1, part2) = splitListWhile(rest)(pred)
+        (x :: part1, part2)
+      case _ =>
+        (Nil, xs)
+    }
+
+  def telescope(binders: List[ParsedBinder]): List[Doc] =
+    binders match {
+      case Nil => Nil
+      case b0 :: _ =>
+        val (group, rest) = if (b0.info == InstImplicit) (List(b0), binders.tail)
+        else splitListWhile(binders)(b => b.info == b0.info && b.ty == b0.ty)
+        val bare = wordwrap(group.map(b => if (b.isAnon && !b.occursInBody) text("_") else pp(b.name))) <+>
+          ":" </> pp(b0.ty).parens(1).group
+        nest(b0.info match {
+          //          case Default if group.size == 1 => bare
+          case Default => "(" <> bare <> ")"
+          case Implicit => "{" <> bare <> "}"
+          case StrictImplicit => "{{" <> bare <> "}}"
+          case InstImplicit => "[" <> bare <> "]"
+        }) :: telescope(rest)
+    }
+
+  def pp(binders: ParsedBinders, inner: Parenable): Parenable =
+    binders match {
+      case Nil => inner
+      case b :: rest if b.isImp =>
+        Parenable(24, (nest(pp(b.ty).parens(25)) <+> "→" <> line).group <> pp(rest, inner).parens(24))
+      case b :: _ if b.isForall =>
+        val (group, rest) = splitListWhile(binders)(_.isForall)
+        Parenable(0, nest("∀" <+> wordwrap(telescope(group)) <> ",") </> pp(rest, inner).parens(0))
+      case b :: _ if b.isLambda =>
+        val (group, rest) = splitListWhile(binders)(_.isLambda)
+        Parenable(0, nest("λ" <+> wordwrap(telescope(group)) <> ",") </> pp(rest, inner).parens(0))
+    }
 
   def pp(e: Expr): Parenable =
     e match {
@@ -109,18 +178,8 @@ class PrettyPrinter(
         val univParams: Doc = if (levels.isEmpty) "" else ".{" <> pp(levels) <> "}"
         Parenable(MaxPrio, "@" <> pp(name) <> univParams)
       case LocalConst(of, _) => Parenable(MaxPrio, pp(of.prettyName))
-      case Lam(domain, body) =>
-        withFreshLC(LocalConst(domain)) { lc =>
-          Parenable(0, ("λ" <+> pp(lc.of) <> "," </>
-            pp(body.instantiate(lc)).parens(0)).group)
-        }
-      case Pi(domain, body) if !body.hasVars && domain.info == BinderInfo.Default =>
-        Parenable(24, (pp(domain.ty).parens(25) <+> "→" </> pp(body).parens(24)).group)
-      case Pi(domain, body) =>
-        withFreshLC(LocalConst(domain)) { lc =>
-          Parenable(0, ("∀" <+> pp(lc.of) <> "," </>
-            pp(body.instantiate(lc)).parens(0)).group)
-        }
+      case Lam(_, _) | Pi(_, _) =>
+        parseBinders(e) { (binders, inner) => pp(binders, pp(inner)) }
       case Let(domain, value, body) =>
         withFreshLC(LocalConst(domain)) { lc =>
           Parenable(0, (nest("let" <+> pp(lc.of) <+> ":=" </> pp(value).parens(0).group <+> "in") </>
@@ -135,7 +194,17 @@ class PrettyPrinter(
           }
         val (fn, as) = go(e, Nil)
         if (as.isEmpty) pp(fn) else
-          Parenable(MaxPrio - 1, nest(stack(pp(fn).parens(MaxPrio - 1).group :: as.map(pp(_).parens(MaxPrio).group))))
+          Parenable(MaxPrio - 1, nest(wordwrap(pp(fn).parens(MaxPrio - 1).group :: as.map(pp(_).parens(MaxPrio).group))))
+    }
+
+  def parseParams[T](ty: Expr, value: Expr)(f: (List[ParsedBinder], List[ParsedBinder], Expr, Expr) => T): T =
+    parseBinders(ty) { (binders, ty) =>
+      def go(binders: List[ParsedBinder], value: Expr, reverseParams: List[ParsedBinder]): T =
+        (binders, value) match {
+          case (b :: bs, Lam(_, value_)) if b.isForall => go(bs, value_, b :: reverseParams)
+          case _ => f(reverseParams.reverse, binders, ty, value.instantiate(0, reverseParams.view.map(_.lc).toVector))
+        }
+      go(binders, value, Nil)
     }
 
   def pp(decl: Declaration): Doc =
@@ -143,12 +212,19 @@ class PrettyPrinter(
       case Definition(name, univParams, ty, value, _) =>
         val ups: Doc = if (univParams.isEmpty) "" else " " <> pp(univParams)
         val isProp = typeChecker.exists(_.isProposition(ty))
-        val cmd = if (isProp) "lemma" else "def"
-        val ppVal: Doc = if (isProp && hideProofs) "_" else pp(value).parens(0).group
-        cmd <> ups <+> nest(pp(name) <+> ":" </> pp(ty).parens(0).group <+> ":=") </> ppVal <> line
+        parseParams(ty, value) { (params, tyBinders, ty, value) =>
+          val cmd = if (isProp) "lemma" else "def"
+          val ppVal: Doc = if (isProp && hideProofs) "_" else pp(value).parens(0).group
+          cmd <> ups <+> nest(nest(wordwrap(pp(name) :: telescope(params))) <+>
+            ":" </> pp(tyBinders, pp(ty)).parens(0).group <+> ":=") </> ppVal <> line
+        }
       case Axiom(name, univParams, ty) =>
         val ups: Doc = if (univParams.isEmpty) "" else " " <> pp(univParams)
-        "axiom" <> ups <+> nest(pp(name) <+> ":" </> pp(ty).parens(0).group) <> line
+        parseBinders(ty) { (binders, ty) =>
+          val (params, rest) = splitListWhile(binders)(_.isForall)
+          "axiom" <> ups <+> nest(nest(wordwrap(pp(name) :: telescope(params))) <+>
+            ":" </> pp(rest, pp(ty)).parens(0).group) <> line
+        }
       case _: Builtin =>
         "/- builtin -/" <+> pp(decl.asAxiom)
     }

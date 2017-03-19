@@ -34,6 +34,16 @@ case class Binding(prettyName: Name, ty: Expr, info: BinderInfo) {
 }
 
 sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Product {
+  def hasVar(i: Int): Boolean =
+    this match {
+      case _ if varBound <= i => false
+      case Var(idx) => idx == i
+      case App(a, b) => a.hasVar(i) || b.hasVar(i)
+      case Lam(dom, body) => dom.ty.hasVar(i) || body.hasVar(i + 1)
+      case Pi(dom, body) => dom.ty.hasVar(i) || body.hasVar(i + 1)
+      case Let(dom, value, body) => dom.ty.hasVar(i) || value.hasVar(i) || body.hasVar(i + 1)
+    }
+
   def hasVars: Boolean = varBound > 0
 
   def abstr(lc: LocalConst): Expr = abstr(0, Vector(lc))

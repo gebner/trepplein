@@ -76,4 +76,9 @@ object Doc {
 
   def spread(cols: Traversable[Doc]): Doc = sep(cols, Text(" "))
   def stack(lines: Traversable[Doc]): Doc = sep(lines, Line)
+
+  def wordwrap(ds: Iterable[Doc]): Doc =
+    ds.view.zipWithIndex.
+      map { case (d, i) => if (i == 0) d else (line <> d).group }.
+      reduceLeftOption(_ <> _).getOrElse("")
 }
