@@ -13,10 +13,6 @@ sbt stage
 ./target/universal/stage/bin/trepplein .../export.out
 ```
 
-### To do
-
- * Pretty-printing of checked theorems and used axioms
-
 ### Other checkers
 
 * [tc](https://github.com/dselsam/tc), a type-checker written in Haskell.
