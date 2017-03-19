@@ -6,10 +6,14 @@ import Doc._
 
 import scala.collection.mutable
 
-sealed trait Notation
-case class Infix(op: String) extends Notation
-case class Prefix(op: String) extends Notation
-case class Postfix(op: String) extends Notation
+sealed trait Notation {
+  def fn: Name
+  def prio: Int
+  def op: String
+}
+case class Infix(fn: Name, prio: Int, op: String) extends Notation
+case class Prefix(fn: Name, prio: Int, op: String) extends Notation
+case class Postfix(fn: Name, prio: Int, op: String) extends Notation
 
 class PrettyPrinter(
     typeChecker: Option[TypeChecker] = None,
@@ -192,9 +196,23 @@ class PrettyPrinter(
             case App(hd, a) => go(hd, a :: as)
             case hd => (hd, as)
           }
-        val (fn, as) = go(e, Nil)
-        if (as.isEmpty) pp(fn) else
+        def printDefault(fn: Expr, as: List[Expr]) =
           Parenable(MaxPrio - 1, nest(wordwrap(pp(fn).parens(MaxPrio - 1).group :: as.map(pp(_).parens(MaxPrio).group))))
+        go(e, Nil) match {
+          case (fn, Nil) => pp(fn)
+          case (fn @ Const(n, _), as) =>
+            notations.get(n) match {
+              case Some(Prefix(_, prio, op)) if as.size == 1 =>
+                Parenable(prio - 1, op <> pp(as(0)).parens(prio))
+              case Some(Postfix(_, prio, op)) if as.size == 1 =>
+                Parenable(prio - 1, pp(as(0)).parens(prio) <> op)
+              case Some(Infix(_, prio, op)) if as.size == 2 =>
+                Parenable(prio - 1, pp(as(0)).parens(prio) <> op <> pp(as(1)).parens(prio))
+              case _ =>
+                printDefault(fn, as)
+            }
+          case (fn, as) => printDefault(fn, as)
+        }
     }
 
   def parseParams[T](ty: Expr, value: Expr)(f: (List[ParsedBinder], List[ParsedBinder], Expr, Expr) => T): T =

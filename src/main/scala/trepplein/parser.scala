@@ -5,6 +5,10 @@ import org.parboiled2._
 import scala.collection.mutable
 import scala.util.{ Failure, Success }
 
+sealed trait ExportFileCommand
+case class ExportedModification(modification: Modification) extends ExportFileCommand
+case class ExportedNotation(notation: Notation) extends ExportFileCommand
+
 private class TextExportParser {
   val name: mutable.ArrayBuffer[Name] = mutable.ArrayBuffer[Name]()
   val level: mutable.ArrayBuffer[Level] = mutable.ArrayBuffer[Level]()
@@ -71,11 +75,11 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
         "#EZ " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((n: Name, t: Expr, v: Expr, b: Expr) => Let(Binding(n, t, BinderInfo.Default), v, b))
     }
 
-  def notationDef: Rule0 =
+  def notationDef: Rule1[Notation] =
     rule {
-      "#INFIX " ~ rest ~> ((_: String) => ()) |
-        "#POSTFIX " ~ rest ~> ((_: String) => ()) |
-        "#PREFIX " ~ rest ~> ((_: String) => ())
+      "#INFIX " ~ nameRef ~ " " ~ int ~ " " ~ rest ~> ((n: Name, p: Int, text: String) => Infix(n, p, text)) |
+        "#POSTFIX " ~ nameRef ~ " " ~ int ~ " " ~ rest ~> ((n: Name, p: Int, text: String) => Postfix(n, p, text)) |
+        "#PREFIX " ~ nameRef ~ " " ~ int ~ " " ~ rest ~> ((n: Name, p: Int, text: String) => Prefix(n, p, text))
     }
 
   def univParams: Rule1[Vector[Level.Param]] = rule { restNums ~> ((ps: Seq[Int]) => ps.view.map(name).map(Level.Param).toVector) }
@@ -96,18 +100,18 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
     )
   }
 
-  def line: Rule1[Option[Modification]] =
+  def line: Rule1[Option[ExportFileCommand]] =
     rule {
       (int ~ " " ~ (nameDef ~> { (i: Int, n: Name) => write(name, i, n, Name.Anon); None } |
         exprDef ~> { (i: Int, e: Expr) => write(expr, i, e, Sort(0)); None } |
         levelDef ~> { (i: Int, l: Level) => write(level, i, l, Level.Zero); None }) |
-        notationDef ~ push(None) |
-        modification ~> ((x: Modification) => Some(x))) ~ EOI
+        notationDef ~> ((x: Notation) => Some(ExportedNotation(x))) |
+        modification ~> ((x: Modification) => Some(ExportedModification(x)))) ~ EOI
     }
 }
 
 object TextExportParser {
-  def parse(lines: Stream[String]): Stream[Modification] = {
+  def parse(lines: Stream[String]): Stream[ExportFileCommand] = {
     val parser = new TextExportParser
     lines.flatMap { l =>
       val lineParser = new LineParser(parser, l)
@@ -120,6 +124,6 @@ object TextExportParser {
     }
   }
 
-  def parseFile(fn: String): Stream[Modification] =
+  def parseFile(fn: String): Stream[ExportFileCommand] =
     parse(io.Source.fromFile(fn).getLines().toStream)
 }

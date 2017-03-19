@@ -5,13 +5,14 @@ import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 
-class LibraryPrinter(env: PreEnvironment, out: String => Unit,
+class LibraryPrinter(env: PreEnvironment, notations: Map[Name, Notation],
+    out: String => Unit,
     hideProofs: Boolean = true, lineWidth: Int = 80,
     printDependencies: Boolean = true) {
   private val declsPrinted = mutable.Map[Name, Unit]()
   def printDecl(name: Name): Unit = declsPrinted.getOrElseUpdate(name, {
     val tc = new TypeChecker(env, unsafeUnchecked = true)
-    val pp = new PrettyPrinter(typeChecker = Some(tc), hideProofs = hideProofs)
+    val pp = new PrettyPrinter(typeChecker = Some(tc), notations = notations, hideProofs = hideProofs)
 
     val decl = env(name)
     if (printDependencies) {
@@ -48,10 +49,16 @@ object main {
   def main(args: Array[String]): Unit =
     args match {
       case Array(fn) =>
-        val preEnv = TextExportParser.parseFile(fn)
+        val exportedCommands = TextExportParser.parseFile(fn)
+
+        val preEnv = exportedCommands.collect { case ExportedModification(mod) => mod }
           .foldLeft[PreEnvironment](Environment.default)(_.add(_))
 
-        val printer = new LibraryPrinter(preEnv, print, hideProofs = true)
+        val notations = Map() ++ exportedCommands.
+          collect { case ExportedNotation(not) => not.fn -> not }.
+          reverse // the beautiful unicode notation is exported first
+
+        val printer = new LibraryPrinter(preEnv, notations, print, hideProofs = true)
         preEnv.declarations.keys.foreach(printer.handleArg)
 
         Await.result(preEnv.force, Duration.Inf) match {
