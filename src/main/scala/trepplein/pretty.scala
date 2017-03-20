@@ -50,8 +50,8 @@ class PrettyPrinter(
       usedLCs(n) || typeChecker.exists(_.env.declarations.contains(n))
 
     val sanitizedSuggestion = suggestion.toString.
-      filter(_.isLetterOrDigit).
-      dropWhile(_.isDigit) match {
+      filter(c => c.isLetterOrDigit || c == '_').
+      dropWhile(c => c.isDigit || c == '_') match {
         case "" => "a"
         case s => s
       }
@@ -76,16 +76,6 @@ class PrettyPrinter(
 
   def ppBareBinder(binding: Binding): Doc =
     pp(binding.prettyName) <+> ":" </> pp(binding.ty).parens(1).group
-
-  def pp(binding: Binding): Doc = {
-    def bare = ppBareBinder(binding)
-    nest(binding.info match {
-      case Default => bare
-      case Implicit => "{" <> bare <> "}"
-      case StrictImplicit => "{{" <> bare <> "}}"
-      case InstImplicit => "[" <> bare <> "]"
-    })
-  }
 
   def isImplicit(fn: Expr): Boolean =
     typeChecker match {
@@ -186,7 +176,7 @@ class PrettyPrinter(
         parseBinders(e) { (binders, inner) => pp(binders, pp(inner)) }
       case Let(domain, value, body) =>
         withFreshLC(LocalConst(domain)) { lc =>
-          Parenable(0, (nest("let" <+> pp(lc.of) <+> ":=" </> pp(value).parens(0).group <+> "in") </>
+          Parenable(0, (nest("let" <+> ppBareBinder(lc.of).group <+> ":=" </> pp(value).parens(0).group <+> "in") </>
             pp(body.instantiate(lc)).parens(0)).group)
         }
       case App(_, _) =>
