@@ -6,6 +6,14 @@ import Doc._
 
 import scala.collection.mutable
 
+case class PrettyOptions(
+  showImplicits: Boolean = true,
+  hideProofs: Boolean = false,
+  hideProofTerms: Boolean = false,
+  showNotation: Boolean = true,
+  nestDepth: Int = 2
+)
+
 sealed trait Notation {
   def fn: Name
   def prio: Int
@@ -18,10 +26,10 @@ case class Postfix(fn: Name, prio: Int, op: String) extends Notation
 class PrettyPrinter(
     typeChecker: Option[TypeChecker] = None,
     notations: Map[Name, Notation] = Map(),
-    hideProofs: Boolean = false,
-    hideProofTerms: Boolean = false,
-    nestDepth: Int = 2
+    options: PrettyOptions = PrettyOptions()
 ) {
+  import options._
+
   val usedLCs: mutable.Set[Name] = mutable.Set[Name]()
 
   val MaxPrio = 1024
@@ -190,7 +198,7 @@ class PrettyPrinter(
           Parenable(MaxPrio - 1, nest(wordwrap(pp(fn).parens(MaxPrio - 1).group :: as.map(pp(_).parens(MaxPrio).group))))
         go(e, Nil) match {
           case (fn, Nil) => pp(fn)
-          case (fn @ Const(n, _), as) =>
+          case (fn @ Const(n, _), as) if showNotation =>
             notations.get(n) match {
               case Some(Prefix(_, prio, op)) if as.size == 1 =>
                 Parenable(prio - 1, (op <> zeroWidthLine).group <> pp(as(0)).parens(prio))
