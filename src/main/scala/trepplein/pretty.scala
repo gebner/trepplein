@@ -39,7 +39,7 @@ class PrettyPrinter(
       if (newPrio > prio) "(" <> doc <> ")" else doc
   }
 
-  def showImplicits: Boolean = typeChecker.nonEmpty
+  def showImplicits: Boolean = options.showImplicits && typeChecker.nonEmpty
 
   def pp(n: Name): Doc = n.toString
 
@@ -167,19 +167,22 @@ class PrettyPrinter(
         Parenable(0, nest("λ" <+> wordwrap(telescope(group)) <> ",") </> pp(rest, inner).parens(0))
     }
 
+  private def constName(n: Name): Parenable =
+    Parenable(MaxPrio, if (!showImplicits) pp(n) else "@" <> pp(n))
+
   def pp(e: Expr): Parenable =
     e match {
       case _ if hideProofTerms && typeChecker.exists(_.isProof(e)) => Parenable(MaxPrio, "_")
       case Var(idx) => Parenable(MaxPrio, s"#$idx")
-      case Sort(level) if level.isZero => Parenable(MaxPrio, "Prop")
+      case Sort(level) if level.isZero && options.showNotation => Parenable(MaxPrio, "Prop")
       case Sort(Succ(level)) => Parenable(MaxPrio, "Type" <+> pp(level).parens(MaxPrio))
       case Sort(level) => Parenable(MaxPrio, "Sort" <+> pp(level).parens(MaxPrio))
       case Const(name, _) if typeChecker.exists(_.env.get(name).nonEmpty) =>
-        Parenable(MaxPrio, pp(name))
+        constName(name)
       case Const(name, levels) =>
         val univParams: Doc = if (levels.isEmpty) "" else ".{" <> pp(levels) <> "}"
         Parenable(MaxPrio, "@" <> pp(name) <> univParams)
-      case LocalConst(of, _) => Parenable(MaxPrio, pp(of.prettyName))
+      case LocalConst(of, _) => constName(of.prettyName)
       case Lam(_, _) | Pi(_, _) =>
         parseBinders(e) { (binders, inner) => pp(binders, pp(inner)) }
       case Let(domain, value, body) =>
@@ -190,7 +193,7 @@ class PrettyPrinter(
       case App(_, _) =>
         def go(e: Expr, as: List[Expr]): (Expr, List[Expr]) =
           e match {
-            case App(hd, _) if isImplicit(hd) => go(hd, as)
+            case App(hd, _) if !showImplicits && isImplicit(hd) => go(hd, as)
             case App(hd, a) => go(hd, a :: as)
             case hd => (hd, as)
           }

@@ -44,6 +44,17 @@ class LibraryPrinter(env: PreEnvironment, notations: Map[Name, Notation],
     checkAxioms(name)
     printDecl(name)
   }
+
+  val preludeHeader: String =
+    """prelude
+      |set_option eqn_compiler.lemmas false
+      |set_option inductive.no_confusion false
+      |set_option inductive.rec_on false
+      |set_option inductive.brec_on false
+      |set_option inductive.cases_on false
+      |noncomputable theory
+      |
+      |""".stripMargin
 }
 
 case class MainOpts(
@@ -52,6 +63,7 @@ case class MainOpts(
     printAllDecls: Boolean = false,
     printDecls: Seq[Name] = Seq(),
     printDependencies: Boolean = false,
+    validLean: Boolean = false,
 
     showImplicits: Boolean = false,
     useNotation: Boolean = true,
@@ -77,6 +89,9 @@ object MainOpts {
     opt[Unit]('d', "print-dependencies")
       .action((_, c) => c.copy(printDependencies = true))
       .text("print dependencies of specified declarations as well")
+    opt[Unit]("valid-lean")
+      .action((_, c) => c.copy(validLean = true, printDependencies = true, useNotation = false))
+      .text("try to produce output that can be parsed again")
 
     opt[Boolean]("show-implicits").action((x, c) => c.copy(showImplicits = x))
       .text("show implicit arguments").valueName("yes/no")
@@ -110,6 +125,7 @@ object main {
         val printer = new LibraryPrinter(preEnv, notations, print, opts.prettyOpts,
           printDependencies = opts.printDependencies || opts.printAllDecls)
         val declsToPrint = if (opts.printAllDecls) preEnv.declarations.keys else opts.printDecls
+        if (opts.validLean) print(printer.preludeHeader)
         declsToPrint.foreach(printer.handleArg)
 
         Await.result(preEnv.force, Duration.Inf) match {
