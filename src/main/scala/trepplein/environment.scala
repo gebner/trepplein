@@ -90,7 +90,7 @@ sealed class PreEnvironment protected (
   def addWithFuture(mod: Modification)(implicit executionContext: ExecutionContext): (Future[Option[EnvironmentUpdateError]], PreEnvironment) = {
     val compiled = mod.compile(this)
     val checkingTask = Future {
-      Try(compiled.check()).toEither.swap.toOption.
+      Try(compiled.check()).failed.toOption.
         map(t => EnvironmentUpdateError(mod, t.getMessage))
     }
     checkingTask -> new PreEnvironment(addDeclsFor(compiled), checkingTask :: proofObligations)

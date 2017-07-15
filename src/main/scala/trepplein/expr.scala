@@ -249,14 +249,24 @@ trait Binders[T <: Expr] {
 }
 
 object Lam extends Binder[Lam] {
-  val generic: GenericUnapply = { case e: Lam => Lam.unapply(e) case _ => None }
+  val generic: GenericUnapply = new GenericUnapply {
+    def unapply(e: Expr) = e match {
+      case e: Lam => Lam.unapply(e)
+      case _ => None
+    }
+  }
 }
 object Lams extends Binders[Lam] {
   protected val Single = Lam
 }
 
 object Pi extends Binder[Pi] {
-  val generic: GenericUnapply = { case e: Pi => Pi.unapply(e) case _ => None }
+  val generic: GenericUnapply = new GenericUnapply {
+    def unapply(e: Expr) = e match {
+      case e: Pi => Pi.unapply(e)
+      case _ => None
+    }
+  }
 }
 object Pis extends Binders[Pi] {
   protected val Single = Pi
