@@ -33,11 +33,10 @@ class LibraryPrinter(env: PreEnvironment, notations: Map[Name, Notation],
     case Definition(_, _, ty, value, _) =>
       ty.constants.foreach(checkAxioms)
       value.constants.foreach(checkAxioms)
-    case Axiom(_, _, _) =>
+    case Axiom(_, _, ty, _) =>
+      ty.constants.foreach(checkAxioms)
       printDecl(name)
     // TODO: inductive, quotient
-    case decl =>
-      decl.ty.constants.foreach(checkAxioms)
   })
 
   def handleArg(name: Name): Unit = {

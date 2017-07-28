@@ -180,7 +180,7 @@ class PrettyPrinter(
       case Const(name, _) if typeChecker.exists(_.env.get(name).nonEmpty) =>
         constName(name)
       case Const(name, levels) =>
-        val univParams: Doc = if (levels.isEmpty) "" else ".{" <> pp(levels) <> "}"
+        val univParams: Doc = if (levels.isEmpty) "" else "." <> pp(levels)
         Parenable(MaxPrio, "@" <> pp(name) <> univParams)
       case LocalConst(of, _) => constName(of.prettyName)
       case Lam(_, _) | Pi(_, _) =>
@@ -237,15 +237,14 @@ class PrettyPrinter(
           cmd <> ups <+> nest(nest(wordwrap(pp(name) :: telescope(params))) <+>
             ":" </> pp(tyBinders, pp(ty)).parens(0).group <+> ":=") </> ppVal <> line
         }
-      case Axiom(name, univParams, ty) =>
+      case Axiom(name, univParams, ty, builtin) =>
         val ups: Doc = if (univParams.isEmpty) "" else " " <> pp(univParams)
-        parseBinders(ty) { (binders, ty) =>
+        val doc = parseBinders(ty) { (binders, ty) =>
           val (params, rest) = splitListWhile(binders)(_.isForall)
           "axiom" <> ups <+> nest(nest(wordwrap(pp(name) :: telescope(params))) <+>
             ":" </> pp(rest, pp(ty)).parens(0).group) <> line
         }
-      case _: Builtin =>
-        "/- builtin -/" <+> pp(decl.asAxiom)
+        if (builtin) "/- builtin -/" <+> doc else doc
     }
 }
 

@@ -2,16 +2,13 @@ package trepplein
 
 import trepplein.Level.Param
 
-final case class InductiveType(name: Name, univParams: Vector[Level.Param], ty: Expr) extends Builtin
-final case class Elim(name: Name, ty: Expr, ind: InductiveType, univParams: Vector[Level.Param],
-  numParams: Int, numIndices: Int, numMinors: Int,
-  motive: Int, major: Int, depElim: Boolean,
-  kIntro: Option[Name]) extends Builtin
-final case class Intro(name: Name, ty: Expr, ind: InductiveType, univParams: Vector[Level.Param], compRule: Expr) extends Builtin
+final case class InductiveType(name: Name, univParams: Vector[Level.Param], ty: Expr) {
+  val decl = Axiom(name, univParams, ty, builtin = true)
+}
 
 final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends CompiledModification {
   import indMod._
-  val tc = new TypeChecker(env.addNow(inductiveType.asAxiom))
+  val tc = new TypeChecker(env.addNow(inductiveType.decl))
   import tc.NormalizedPis
 
   def name: Name = inductiveType.name
@@ -50,13 +47,17 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
       Apps(Const(name, univParams), params ++ arguments)
     )), BinderInfo.Default))
 
-    lazy val compRule: Expr = {
+    lazy val redRule: ReductionRule = {
       val recCalls = arguments.zip(argInfos).collect {
         case (recArg, Right((eps, recArgIndices))) =>
           Lams(eps)(Apps(Const(elimDecl.name, elimLevelParams), params ++ Seq(motive) ++ minorPremises ++ recArgIndices :+ Apps(recArg, eps)))
       }
-      Lams(params ++ Seq(motive) ++ minorPremises ++ arguments)(
-        Apps(minorPremise, arguments ++ recCalls)
+      ReductionRule(
+        Vector() ++ params ++ Seq(motive) ++ minorPremises ++ indices ++ arguments,
+        Apps(Const(elimDecl.name, elimLevelParams), params ++ Seq(motive) ++ minorPremises ++ indices
+          :+ Apps(Const(name, univParams), params ++ arguments)),
+        Apps(minorPremise, arguments ++ recCalls),
+        List()
       )
     }
 
@@ -72,9 +73,6 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
           for (e <- eps) tc0.inferUniverseOfType(tc0.infer(e))
       }
 
-      require(!compRule.hasLocals)
-      require(!compRule.hasVars)
-
       if (level.maybeNonZero) for (arg <- arguments) {
         val argLevel = tc.inferUniverseOfType(tc.infer(arg))
         require(argLevel <== level)
@@ -83,12 +81,6 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
   }
 
   val compiledIntros: Vector[CompiledIntro] = intros.map(CompiledIntro.tupled)
-  val kIntro: Option[Name] =
-    compiledIntros match {
-      case Vector(intro) if intro.arguments.isEmpty && level.isZero =>
-        Some(intro.name)
-      case _ => None
-    }
 
   val elimIntoProp: Boolean = level.maybeZero &&
     (intros.size > 1 || compiledIntros.exists { intro =>
@@ -114,21 +106,38 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
   val majorPremise = LocalConst(Binding("x", Apps(indTy, params ++ indices), BinderInfo.Default))
   val elimType: Expr = Pis(params ++ Seq(motive) ++ minorPremises ++ indices :+ majorPremise)(mkMotiveApp(indices, majorPremise))
   val elimLevelParams: Vector[Param] = extraElimLevelParams ++ univParams
-  val elimDecl = Elim(Name.Str(name, "rec"), elimType, inductiveType, elimLevelParams,
-    numParams = numParams, motive = numParams, numIndices = indices.size, numMinors = minorPremises.size,
-    major = numParams + 1 + minorPremises.size + indices.size, depElim = useDepElim,
-    kIntro = kIntro)
+  val elimDecl = Axiom(Name.Str(name, "rec"), elimLevelParams, elimType, builtin = true)
 
-  val introDecls: Vector[Intro] =
+  val kIntroRule: Option[ReductionRule] =
+    compiledIntros match {
+      case Vector(intro) if intro.arguments.isEmpty && level.isZero =>
+        Some(ReductionRule(
+          Vector() ++ params ++ Seq(motive) ++ minorPremises ++ indices ++ Seq(majorPremise),
+          Apps(Const(elimDecl.name, elimLevelParams), params ++ Seq(motive) ++ minorPremises ++ indices
+            ++ Seq(majorPremise)),
+          minorPremises(0),
+          (intro.introTyArgs zip (params ++ indices)).filter { case (a, b) => a != b }
+        ))
+      case _ => None
+    }
+
+  val introDecls: Vector[Axiom] =
     for (i <- compiledIntros)
-      yield Intro(i.name, i.ty, inductiveType, inductiveType.univParams, i.compRule)
+      yield Axiom(i.name, univParams, i.ty, builtin = true)
 
-  val decls: Vector[Declaration] = inductiveType +: introDecls :+ elimDecl
+  val decls: Vector[Declaration] = Axiom(name, univParams, inductiveType.ty) +: introDecls :+ elimDecl
+  val rules: Vector[ReductionRule] =
+    if (kIntroRule.isDefined)
+      kIntroRule.toVector
+    else if (elimIntoProp)
+      Vector()
+    else
+      compiledIntros.map(_.redRule)
 
   def check(): Unit = {
-    val withType = env.addNow(inductiveType.asAxiom)
-    val withIntros = introDecls.foldLeft(withType)((env, i) => { i.asAxiom.check(withType); env.addNow(i.asAxiom) })
-    withIntros.addNow(elimDecl.asAxiom)
+    val withType = env.addNow(inductiveType.decl)
+    val withIntros = introDecls.foldLeft(withType)((env, i) => { i.check(withType); env.addNow(i) })
+    withIntros.addNow(elimDecl)
 
     for (i <- compiledIntros) i.check()
   }

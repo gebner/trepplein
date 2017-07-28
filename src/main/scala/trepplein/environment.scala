@@ -4,14 +4,14 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.language.implicitConversions
 import scala.util.Try
 
-abstract class Declaration {
+sealed trait Declaration {
   def name: Name
   def univParams: Vector[Level.Param]
   def ty: Expr
 
   def asAxiom: Axiom = Axiom(name, univParams, ty)
 }
-final case class Axiom(name: Name, univParams: Vector[Level.Param], ty: Expr) extends Declaration {
+final case class Axiom(name: Name, univParams: Vector[Level.Param], ty: Expr, builtin: Boolean = false) extends Declaration {
   def check(env: PreEnvironment): Unit = {
     require(!env.declarations.contains(name))
     require(ty.univParams.subsetOf(univParams.toSet))
@@ -32,11 +32,10 @@ final case class Definition(name: Name, univParams: Vector[Level.Param],
   }
 }
 
-abstract class Builtin extends Declaration
-
 trait CompiledModification {
   def check(): Unit
   def decls: Seq[Declaration]
+  def rules: Seq[ReductionRule]
 }
 
 trait Modification {
@@ -52,6 +51,7 @@ final case class AxiomMod(ax: Axiom) extends Modification {
   def compile(env: PreEnvironment) = new CompiledModification {
     def check(): Unit = ax.check(env)
     def decls: Seq[Declaration] = Seq(ax)
+    def rules: Seq[ReductionRule] = Seq()
   }
 }
 final case class DefMod(defn: Definition) extends Modification {
@@ -67,6 +67,7 @@ final case class DefMod(defn: Definition) extends Modification {
 
     def check(): Unit = defn.check(env)
     def decls: Seq[Declaration] = Seq(defn.copy(height = height))
+    def rules: Seq[ReductionRule] = Seq(ReductionRule(Const(defn.name, defn.univParams), defn.value, List()))
   }
 }
 
@@ -76,6 +77,7 @@ case class EnvironmentUpdateError(mod: Modification, msg: String) {
 
 sealed class PreEnvironment protected (
     val declarations: Map[Name, Declaration],
+    val reductions: ReductionMap,
     val proofObligations: List[Future[Option[EnvironmentUpdateError]]]
 ) {
 
@@ -93,13 +95,13 @@ sealed class PreEnvironment protected (
       Try(compiled.check()).failed.toOption.
         map(t => EnvironmentUpdateError(mod, t.getMessage))
     }
-    checkingTask -> new PreEnvironment(addDeclsFor(compiled), checkingTask :: proofObligations)
+    checkingTask -> new PreEnvironment(addDeclsFor(compiled), reductions ++ compiled.rules, checkingTask :: proofObligations)
   }
 
   def addNow(mod: Modification): PreEnvironment = {
     val compiled = mod.compile(this)
     compiled.check()
-    new PreEnvironment(addDeclsFor(compiled), proofObligations)
+    new PreEnvironment(addDeclsFor(compiled), reductions ++ compiled.rules, proofObligations)
   }
 
   def add(mod: Modification)(implicit executionContext: ExecutionContext): PreEnvironment =
@@ -109,14 +111,14 @@ sealed class PreEnvironment protected (
     Environment.force(this)
 }
 
-final class Environment private (declarations: Map[Name, Declaration])
-  extends PreEnvironment(declarations, Nil)
+final class Environment private (declarations: Map[Name, Declaration], reductionMap: ReductionMap)
+  extends PreEnvironment(declarations, reductionMap, Nil)
 object Environment {
   def force(preEnvironment: PreEnvironment)(implicit executionContext: ExecutionContext): Future[Either[Seq[EnvironmentUpdateError], Environment]] =
     Future.sequence(preEnvironment.proofObligations).map(_.flatten).map {
-      case Nil => Right(new Environment(preEnvironment.declarations))
+      case Nil => Right(new Environment(preEnvironment.declarations, preEnvironment.reductions))
       case exs => Left(exs)
     }
 
-  def default = new Environment(Map())
+  def default = new Environment(Map(), ReductionMap())
 }

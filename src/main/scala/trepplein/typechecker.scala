@@ -69,7 +69,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
   }
 
   private def checkDefEqCore(e1_0: Expr, e2_0: Expr): DefEqRes = {
-    val transparency = Transparency(delta = false, iota = false, misc = true)
+    val transparency = Transparency(reduce = false)
     val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(transparency)
     val e2 @ Apps(fn2, as2) = whnfCore(e2_0)(transparency)
     def checkArgs: DefEqRes =
@@ -116,59 +116,34 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       if (isProofIrrelevantEq(e1, e2)) None else checkDefEqCore(e1, e2)
     })
 
-  private def whnfK(major: Expr, elim: Elim): Expr =
-    elim.kIntro match {
-      case Some(i) =>
-        whnf(infer(major)) match {
-          case majorTy @ Apps(Const(_, univParams), as) =>
-            val synthIntro = Apps(Const(i, univParams), as.take(elim.numParams))
-            if (isDefEq(majorTy, infer(synthIntro)))
-              synthIntro
-            else
-              whnf(major)
-          case _ => whnf(major)
-        }
-      case None => whnf(major)
-    }
-
-  case class Transparency(delta: Boolean, iota: Boolean, misc: Boolean) {
-    def canReduceConstants: Boolean = delta || iota || misc
+  case class Transparency(reduce: Boolean) {
+    def canReduceConstants: Boolean = reduce
   }
   object Transparency {
-    val all = Transparency(delta = true, iota = true, misc = true)
+    val all = Transparency(reduce = true)
   }
 
   def reduceOneStep(e: Expr)(implicit transparency: Transparency): Option[Expr] =
     e match { case Apps(fn, as) => reduceOneStep(fn, as) }
-  private val deltaCache = mutable.Map[(Name, Vector[Level]), Expr]()
-  private val compRuleCache = mutable.Map[(Name, Vector[Level]), Expr]()
-  def reduceOneStep(fn: Expr, as: List[Expr])(implicit transparency: Transparency): Option[Expr] = fn match {
-    case Const(name, levels) =>
-      env.get(name) match {
-        case Some(defn: Definition) if transparency.delta =>
-          val expansion = deltaCache.getOrElseUpdate((name, levels), defn.value.instantiate(defn.univParams.zip(levels).toMap))
-          Some(Apps(expansion, as))
-        case Some(elim: Elim) if transparency.iota =>
-          for {
-            major <- as.drop(elim.major).headOption
-            Apps(Const(introC, _), introArgs) <- Some(whnfK(major, elim))
-            Intro(_, _, indTy, _, compRule) <- env.get(introC)
-            if indTy.name == elim.ind.name
-          } yield Apps(
-            compRuleCache.getOrElseUpdate((introC, levels), compRule.instantiate(elim.univParams.zip(levels).toMap)),
-            as.take(elim.numParams + 1 + elim.numMinors) ++ introArgs.drop(elim.numParams) ++ as.drop(elim.major + 1)
-          )
-        case Some(QuotLift) if transparency.misc && as.size >= 6 =>
-          whnf(as(5)) match {
-            case Apps(Const(quotMk, _), mkArgs) if env.get(quotMk).contains(QuotMk) =>
-              Some(Apps(App(as(3), mkArgs(2)), as.drop(6)))
-            case _ =>
-              None
-          }
-        case _ => None
-      }
-    case _ => None
+  private val reductionRuleCache = new ReductionRuleCache {
+    private val instantiationCache = mutable.Map[(ReductionRule, Map[Level.Param, Level]), Expr]()
+    override def instantiation(rr: ReductionRule, subst: Map[Level.Param, Level], v: => Expr): Expr =
+      instantiationCache.getOrElseUpdate((rr, subst), v)
   }
+  def reduceOneStep(fn: Expr, as0: List[Expr])(implicit transparency: Transparency): Option[Expr] =
+    fn match {
+      case _ if !transparency.reduce => None
+      case Const(n, _) =>
+        val major = env.reductions.major(n)
+        val as = for ((a, i) <- as0.zipWithIndex)
+          yield if (major(i)) whnf(a) else a
+        env.reductions.apply(Apps(fn, as))(reductionRuleCache) match {
+          case Some((result, constraints)) if constraints.forall { case (a, b) => isDefEq(a, b) } =>
+            Some(result)
+          case _ => None
+        }
+      case _ => None
+    }
 
   private val whnfCache = mutable.Map[Expr, Expr]()
   def whnf(e: Expr): Expr = whnfCache.getOrElseUpdate(e, whnfCore(e)(Transparency.all))
