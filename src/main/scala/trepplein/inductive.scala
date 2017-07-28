@@ -110,7 +110,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
 
   val kIntroRule: Option[ReductionRule] =
     compiledIntros match {
-      case Vector(intro) if intro.arguments.isEmpty && level.isZero =>
+      case Vector(intro) if intro.arguments.isEmpty =>
         Some(ReductionRule(
           Vector() ++ params ++ Seq(motive) ++ minorPremises ++ indices ++ Seq(majorPremise),
           Apps(Const(elimDecl.name, elimLevelParams), params ++ Seq(motive) ++ minorPremises ++ indices
