@@ -77,7 +77,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
   }
 
   private def checkDefEqCore(e1_0: Expr, e2_0: Expr): DefEqRes = {
-    val transparency = Transparency(reduce = false)
+    val transparency = Transparency(rho = false, zeta = false)
     val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(transparency)
     val e2 @ Apps(fn2, as2) = whnfCore(e2_0)(transparency)
     def checkArgs: DefEqRes =
@@ -87,7 +87,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
         return reqDefEq(isDefEq(l1, l2) && as1.isEmpty && as2.isEmpty, e1, e2)
       case (Const(c1, ls1), Const(c2, ls2)) if c1 == c2 && (ls1, ls2).zipped.forall(isDefEq) =>
         checkArgs
-      case (LocalConst(_, i1), LocalConst(_, i2)) if i1 == i2 =>
+      case (LocalConst(_, i1, _), LocalConst(_, i2, _)) if i1 == i2 =>
         checkArgs
       case (Lam(dom, b1), Lam(_, b2)) =>
         require(as1.isEmpty && as2.isEmpty)
@@ -123,11 +123,11 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       if (isProofIrrelevantEq(e1, e2)) IsDefEq else checkDefEqCore(e1, e2)
     })
 
-  case class Transparency(reduce: Boolean) {
-    def canReduceConstants: Boolean = reduce
+  case class Transparency(rho: Boolean, zeta: Boolean) {
+    def canReduceConstants: Boolean = rho
   }
   object Transparency {
-    val all = Transparency(reduce = true)
+    val all = Transparency(rho = true, zeta = true)
   }
 
   def reduceOneStep(e: Expr)(implicit transparency: Transparency): Option[Expr] =
@@ -139,8 +139,9 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
   }
   def reduceOneStep(fn: Expr, as0: List[Expr])(implicit transparency: Transparency): Option[Expr] =
     fn match {
-      case _ if !transparency.reduce => None
-      case Const(n, _) =>
+      case LocalConst(_, _, Some(value)) if transparency.zeta =>
+        Some(Apps(value, as0))
+      case Const(n, _) if transparency.rho =>
         val major = env.reductions.major(n)
         val as = for ((a, i) <- as0.zipWithIndex)
           yield if (major(i)) whnf(a) else a
@@ -165,15 +166,14 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
             case _ => Apps(fn.instantiate(0, ctx.toVector), as)
           }
         whnfCore(go(fn, Nil, as))
-      case Let(_, value, body) =>
-        // TODO: zeta
-        whnfCore(Apps(body.instantiate(value), as))
-      case Const(_, _) if transparency.canReduceConstants =>
+      case Let(dom, value, body) =>
+        val lc = LocalConst(dom, value = Some(value))
+        whnfCore(Apps(body.instantiate(lc), as))
+      case _ =>
         reduceOneStep(fn, as) match {
           case Some(e_) => whnfCore(e_)
           case None => e
         }
-      case _ => e
     }
   }
 
@@ -211,7 +211,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
         s"incorrect number of universe parameters: $e, expected ${decl.univParams}"
       )
       decl.ty.instantiate(decl.univParams.zip(levels).toMap)
-    case LocalConst(of, _) =>
+    case LocalConst(of, _, _) =>
       of.ty
     case Apps(fn, as) if as.nonEmpty =>
       def go(fnt: Expr, as: List[Expr], ctx: List[Expr]): Expr =
@@ -245,6 +245,6 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
     case Let(domain, value, body) =>
       if (shouldCheck) inferUniverseOfType(domain.ty)
       if (shouldCheck) checkType(value, domain.ty)
-      infer(body.instantiate(value))
+      infer(body.instantiate(LocalConst(domain, value = Some(value))))
   })
 }
