@@ -2,6 +2,15 @@ package trepplein
 
 import scala.collection.mutable
 
+sealed trait DefEqRes {
+  def &(that: => DefEqRes) = if (this != IsDefEq) this else that
+}
+case object IsDefEq extends DefEqRes {
+  def forall(rs: Traversable[DefEqRes]): DefEqRes =
+    rs.view.collect { case r: NotDefEq => r }.headOption.getOrElse(IsDefEq)
+}
+final case class NotDefEq(a: Expr, b: Expr) extends DefEqRes
+
 class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false) {
   def shouldCheck: Boolean = !unsafeUnchecked
 
@@ -38,11 +47,10 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
   private def isProofIrrelevantEq(e1: Expr, e2: Expr): Boolean =
     isProof(e1) && isProof(e2)
 
-  type DefEqRes = Option[(Expr, Expr)]
   private def reqDefEq(cond: Boolean, e1: Expr, e2: Expr) =
-    if (cond) None else Some((e1, e2))
+    if (cond) IsDefEq else NotDefEq(e1, e2)
 
-  def isDefEq(e1: Expr, e2: Expr): Boolean = checkDefEq(e1, e2).isEmpty
+  def isDefEq(e1: Expr, e2: Expr): Boolean = checkDefEq(e1, e2) == IsDefEq
 
   def defHeight(fn: Expr, as: List[Expr]): Int =
     fn match {
@@ -73,8 +81,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
     val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(transparency)
     val e2 @ Apps(fn2, as2) = whnfCore(e2_0)(transparency)
     def checkArgs: DefEqRes =
-      reqDefEq(as1.size == as2.size, e1, e2) orElse
-        (as1, as2).zipped.view.flatMap { case (a1, a2) => checkDefEq(a1, a2) }.headOption
+      reqDefEq(as1.size == as2.size, e1, e2) & IsDefEq.forall((as1, as2).zipped.view.map { case (a, b) => checkDefEq(a, b) })
     ((fn1, fn2) match {
       case (Sort(l1), Sort(l2)) =>
         return reqDefEq(isDefEq(l1, l2) && as1.isEmpty && as2.isEmpty, e1, e2)
@@ -95,12 +102,12 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       case (Pi(dom1, b1), Pi(dom2, b2)) =>
         val lc = LocalConst(dom1)
         require(as1.isEmpty && as2.isEmpty)
-        return checkDefEq(dom1.ty, dom2.ty) orElse checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc))
+        return checkDefEq(dom1.ty, dom2.ty) & checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc))
       case (_, _) =>
-        Some((e1, e2))
+        NotDefEq(e1, e2)
     }) match {
-      case None => None
-      case d @ Some(_) =>
+      case IsDefEq => IsDefEq
+      case d @ NotDefEq(_, _) =>
         reduceOneStep(e1, e2)(Transparency.all) match {
           case Some((e1_, e2_)) =>
             checkDefEqCore(e1_, e2_)
@@ -112,8 +119,8 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
   private val defEqCache = mutable.Map[(Expr, Expr), DefEqRes]()
   // requires that e1 and e2 have the same type, or are types
   def checkDefEq(e1: Expr, e2: Expr): DefEqRes =
-    if (e1.eq(e2) || e1 == e2) None else defEqCache.getOrElseUpdate((e1, e2), {
-      if (isProofIrrelevantEq(e1, e2)) None else checkDefEqCore(e1, e2)
+    if (e1.eq(e2) || e1 == e2) IsDefEq else defEqCache.getOrElseUpdate((e1, e2), {
+      if (isProofIrrelevantEq(e1, e2)) IsDefEq else checkDefEqCore(e1, e2)
     })
 
   case class Transparency(reduce: Boolean) {
@@ -172,12 +179,18 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
 
   def checkType(e: Expr, ty: Expr): Unit = {
     val inferredTy = infer(e)
-    for ((t_, i_) <- checkDefEq(ty, inferredTy))
-      throw new IllegalArgumentException(s"wrong type: $e : $ty\ninferred type: $inferredTy\n$t_ !=def $i_")
+    checkDefEq(ty, inferredTy) match {
+      case IsDefEq =>
+      case NotDefEq(t_, i_) =>
+        throw new IllegalArgumentException(s"wrong type: $e : $ty\ninferred type: $inferredTy\n$t_ !=def $i_")
+    }
   }
   def requireDefEq(a: Expr, b: Expr): Unit =
-    for ((a_, b_) <- checkDefEq(a, b))
-      throw new IllegalArgumentException(s"\n$a_ =def\n$b_")
+    checkDefEq(a, b) match {
+      case IsDefEq =>
+      case NotDefEq(a_, b_) =>
+        throw new IllegalArgumentException(s"\n$a_ =def\n$b_")
+    }
 
   def inferUniverseOfType(ty: Expr): Level =
     whnf(infer(ty)) match {
