@@ -9,6 +9,7 @@ class LibraryPrinter(env: PreEnvironment, notations: Map[Name, Notation],
     out: String => Unit,
     prettyOptions: PrettyOptions,
     lineWidth: Int = 80,
+    printReductions: Boolean = false,
     printDependencies: Boolean = true) {
   private val declsPrinted = mutable.Map[Name, Unit]()
   def printDecl(name: Name): Unit = declsPrinted.getOrElseUpdate(name, {
@@ -25,7 +26,23 @@ class LibraryPrinter(env: PreEnvironment, notations: Map[Name, Notation],
       }
     }
 
-    out((pp.pp(decl) <> Doc.line).render(lineWidth))
+    var doc = pp.pp(decl)
+
+    val reds = env.reductions.get(name)
+    if (printReductions && reds.nonEmpty) {
+      doc = doc <> "/-" </> Doc.stack(reds.map {
+        case ReductionRule(ctx, lhs, rhs, eqs) =>
+          def mkEq(a: Expr, b: Expr): Expr = Apps(Const("eq", Vector(1)), Sort.Prop, a, b)
+          val term1 = eqs.map((mkEq _).tupled).foldRight(mkEq(lhs, rhs))(_ -->: _)
+          val term2 = ctx.foldRight(term1)(Lam(_, _))
+          pp.parseBinders(term2) { (ctx_, t) =>
+            Doc.text("reduction") <+> pp.nest(Doc.wordwrap(pp.telescope(ctx_) :+ Doc.text(":"))) </>
+              pp.pp(t).parens(0).group <> Doc.line
+          }
+      }) <> "-/" <> Doc.line
+    }
+
+    out((doc <> Doc.line).render(lineWidth))
   })
 
   private val axiomsChecked = mutable.Map[Name, Unit]()
@@ -62,6 +79,7 @@ case class MainOpts(
     printAllDecls: Boolean = false,
     printDecls: Seq[Name] = Seq(),
     printDependencies: Boolean = false,
+    printReductions: Boolean = false,
     validLean: Boolean = false,
 
     showImplicits: Boolean = false,
@@ -88,6 +106,9 @@ object MainOpts {
     opt[Unit]('d', "print-dependencies")
       .action((_, c) => c.copy(printDependencies = true))
       .text("print dependencies of specified declarations as well")
+    opt[Unit]('r', "print-reductions")
+      .action((_, c) => c.copy(printReductions = true))
+      .text("print reduction rules for specified declarations as well")
     opt[Unit]("valid-lean")
       .action((_, c) => c.copy(validLean = true, printDependencies = true, useNotation = false))
       .text("try to produce output that can be parsed again")
@@ -122,6 +143,7 @@ object main {
           reverse // the beautiful unicode notation is exported first
 
         val printer = new LibraryPrinter(preEnv, notations, print, opts.prettyOpts,
+          printReductions = opts.printReductions,
           printDependencies = opts.printDependencies || opts.printAllDecls)
         val declsToPrint = if (opts.printAllDecls) preEnv.declarations.keys else opts.printDecls
         if (opts.validLean) print(printer.preludeHeader)

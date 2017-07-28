@@ -12,11 +12,11 @@ private object NoReductionRuleCache extends ReductionRuleCache {
   override def instantiation(rr: ReductionRule, subst: Map[Param, Level], v: => Expr): Expr = v
 }
 
-final case class ReductionRule(lhs: Expr, rhs: Expr, defEqConstraints: List[(Expr, Expr)]) {
+final case class ReductionRule(ctx: Vector[Binding], lhs: Expr, rhs: Expr, defEqConstraints: List[(Expr, Expr)]) {
   require(!lhs.hasLocals)
   require(!rhs.hasLocals)
 
-  private val varBound = lhs.varBound
+  val varBound: Int = lhs.varBound
   require(rhs.varBound <= varBound)
 
   val Apps(Const(lhsConst, _), lhsArgs) = lhs
@@ -66,8 +66,8 @@ final case class ReductionRule(lhs: Expr, rhs: Expr, defEqConstraints: List[(Exp
   }
 }
 object ReductionRule {
-  def apply(lcs: Vector[LocalConst], lhs: Expr, rhs: Expr, defEqConstraints: List[(Expr, Expr)]): ReductionRule =
-    ReductionRule(lhs.abstr(0, lcs), rhs.abstr(0, lcs),
+  def apply(lcs: Vector[LocalConst], lhs: Expr, rhs: Expr, defEqConstraints: List[(Expr, Expr)])(implicit dummy: DummyImplicit): ReductionRule =
+    ReductionRule(lcs.map(_.of), lhs.abstr(0, lcs), rhs.abstr(0, lcs),
       defEqConstraints.map { case (a, b) => a.abstr(0, lcs) -> b.abstr(0, lcs) })
 }
 
@@ -80,6 +80,9 @@ final class ReductionMap private (keyMap: Map[Name, (Vector[ReductionRule], Set[
   def ++(rs: Traversable[ReductionRule]): ReductionMap = rs.foldLeft(this)((t, r) => t + r)
 
   def major(k: Name): Set[Int] = keyMap(k)._2
+
+  def rules: Vector[ReductionRule] = Vector() ++ keyMap.values.flatMap(_._1)
+  def get(k: Name): Vector[ReductionRule] = keyMap(k)._1
 
   def apply(e: Expr)(implicit cache: ReductionRuleCache = NoReductionRuleCache): Option[(Expr, List[(Expr, Expr)])] =
     e match {

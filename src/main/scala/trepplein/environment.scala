@@ -67,7 +67,7 @@ final case class DefMod(defn: Definition) extends Modification {
 
     def check(): Unit = defn.check(env)
     def decls: Seq[Declaration] = Seq(defn.copy(height = height))
-    def rules: Seq[ReductionRule] = Seq(ReductionRule(Const(defn.name, defn.univParams), defn.value, List()))
+    def rules: Seq[ReductionRule] = Seq(ReductionRule(Vector[Binding](), Const(defn.name, defn.univParams), defn.value, List()))
   }
 }
 
