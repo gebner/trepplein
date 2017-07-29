@@ -18,23 +18,20 @@ object quotient {
   val quotLift = Axiom(Name.Str(quot.name, "lift"), liftUnivParams,
     Pis(A, R, B, f)(
       Pis(a, b)(Apps(R, a, b) -->: Apps(Const(Name("eq"), Vector(liftUnivParams(1))), B, App(f, a), App(f, b))) -->:
-        Apps(Const(quot.name, Vector(liftUnivParams(0))), A, R) -->: B
-    ),
+        Apps(Const(quot.name, Vector(liftUnivParams(0))), A, R) -->: B),
     builtin = true)
 
   val B2 = LocalConst(Binding(Name("B"), Apps(Const(quot.name, Vector(univParams(0))), A, R) -->: Sort.Prop, BinderInfo.Implicit))
   val q = LocalConst(Binding(Name("q"), Apps(Const(quot.name, Vector(univParams(0))), A, R), BinderInfo.Default))
   val quotInd = Axiom(Name.Str(quot.name, "ind"), univParams, Pis(A, R, B2)(
-    Pi(a, Apps(B2, Apps(Const(quotMk.name, Vector(univParams(0))), A, R, a))) -->: Pi(q, Apps(B2, q))
-  ), builtin = true)
+    Pi(a, Apps(B2, Apps(Const(quotMk.name, Vector(univParams(0))), A, R, a))) -->: Pi(q, Apps(B2, q))), builtin = true)
 
   val h = LocalConst(Binding(Name("h"), Apps(Const(Name("eq"), Vector(liftUnivParams(1))), B, App(f, a), App(f, b)), BinderInfo.Default))
   val quotRed = ReductionRule(
     Vector(A, R, B, f, a, h),
     Apps(Const(quotLift.name, univParams), A, R, B, f, h, Apps(Const(quotMk.name, Vector(univParams(0))), A, R, a)),
     Apps(f, a),
-    List()
-  )
+    List())
 }
 
 case object QuotMod extends Modification {

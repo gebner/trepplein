@@ -208,8 +208,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       val decl = env(name)
       require(
         decl.univParams.size == levels.size,
-        s"incorrect number of universe parameters: $e, expected ${decl.univParams}"
-      )
+        s"incorrect number of universe parameters: $e, expected ${decl.univParams}")
       decl.ty.instantiate(decl.univParams.zip(levels).toMap)
     case LocalConst(of, _, _) =>
       of.ty

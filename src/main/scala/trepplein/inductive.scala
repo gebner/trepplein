@@ -44,8 +44,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
 
     lazy val minorPremise = LocalConst(Binding("h", Pis(arguments ++ ihs)(mkMotiveApp(
       introTyIndices,
-      Apps(Const(name, univParams), params ++ arguments)
-    )), BinderInfo.Default))
+      Apps(Const(name, univParams), params ++ arguments))), BinderInfo.Default))
 
     lazy val redRule: ReductionRule = {
       val recCalls = arguments.zip(argInfos).collect {
@@ -57,8 +56,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
         Apps(Const(elimDecl.name, elimLevelParams), params ++ Seq(motive) ++ minorPremises ++ indices
           :+ Apps(Const(name, univParams), params ++ arguments)),
         Apps(minorPremise, arguments ++ recCalls),
-        List()
-      )
+        List())
     }
 
     def check(): Unit = {
@@ -116,8 +114,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
           Apps(Const(elimDecl.name, elimLevelParams), params ++ Seq(motive) ++ minorPremises ++ indices
             ++ Seq(majorPremise)),
           minorPremises(0),
-          (intro.introTyArgs zip (params ++ indices)).filter { case (a, b) => a != b }
-        ))
+          (intro.introTyArgs zip (params ++ indices)).filter { case (a, b) => a != b }))
       case _ => None
     }
 

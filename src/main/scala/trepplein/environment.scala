@@ -78,8 +78,7 @@ case class EnvironmentUpdateError(mod: Modification, msg: String) {
 sealed class PreEnvironment protected (
     val declarations: Map[Name, Declaration],
     val reductions: ReductionMap,
-    val proofObligations: List[Future[Option[EnvironmentUpdateError]]]
-) {
+    val proofObligations: List[Future[Option[EnvironmentUpdateError]]]) {
 
   def get(name: Name): Option[Declaration] =
     declarations.get(name)

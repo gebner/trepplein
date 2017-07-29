@@ -85,13 +85,11 @@ case class MainOpts(
     showImplicits: Boolean = false,
     useNotation: Boolean = true,
     hideProofs: Boolean = true,
-    hideProofTerms: Boolean = false
-) {
+    hideProofTerms: Boolean = false) {
   def prettyOpts = PrettyOptions(
     showImplicits = showImplicits,
     hideProofs = hideProofs, hideProofTerms = hideProofTerms,
-    showNotation = useNotation
-  )
+    showNotation = useNotation)
 }
 object MainOpts {
   val parser = new scopt.OptionParser[MainOpts]("trepplein") {
