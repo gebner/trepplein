@@ -13,16 +13,14 @@ class NatTest extends Specification {
     val y = LocalConst(Binding("y", nat, BinderInfo.Default))
     Lam(x, Apps(
       Const(Name("nat", "rec"), Vector(1)),
-      Lam(y, nat), x, Lam(y, natSucc)
-    ))
+      Lam(y, nat), x, Lam(y, natSucc)))
   }
 
   def env_ =
     Environment.default
       .addNow(IndMod(
         InductiveType(nat.name, Vector(), Sort(1)),
-        0, Vector(natZero.name -> nat, natSucc.name -> (nat -->: nat))
-      ))
+        0, Vector(natZero.name -> nat, natSucc.name -> (nat -->: nat))))
       .addNow(DefMod(Definition(natAdd.name, Vector(), nat -->: nat -->: nat, addDef)))
 
   def numeral(n: Int): Expr =
@@ -33,8 +31,8 @@ class NatTest extends Specification {
 
   "add" in {
     val t = Apps(natAdd, numeral(2), numeral(4))
-    tc.checkDefEq(tc.infer(t), nat) must beNone
-    tc.checkDefEq(t, numeral(6)) must beNone
-    tc.checkDefEq(t, numeral(7)) must beSome
+    tc.checkDefEq(tc.infer(t), nat) must beLike { case IsDefEq => ok }
+    tc.checkDefEq(t, numeral(6)) must beLike { case IsDefEq => ok }
+    tc.checkDefEq(t, numeral(7)) must beLike { case NotDefEq(_, _) => ok }
   }
 }
