@@ -30,7 +30,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
     type ArgInfo = Either[Expr, (List[LocalConst], List[Expr])]
 
     val argInfos: List[ArgInfo] = arguments.map {
-      case LocalConst(Binding(_, NormalizedPis(eps, Apps(recArgIndTy @ Const(inductiveType.name, _), recArgs)), _), _, _) =>
+      case LocalConst(Binding(_, NormalizedPis(eps, Apps(recArgIndTy @ Const(inductiveType.name, _), recArgs)), _), _) =>
         require(recArgs.size >= numParams)
         tc.requireDefEq(Apps(recArgIndTy, recArgs.take(numParams)), indTyWParams)
         Right((eps, recArgs.drop(numParams)))

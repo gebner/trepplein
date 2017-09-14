@@ -50,7 +50,7 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
   def abstr(off: Int, lcs: Vector[LocalConst]): Expr =
     this match {
       case _ if !hasLocals => this
-      case LocalConst(_, name, _) =>
+      case LocalConst(_, name) =>
         lcs.indexWhere(_.name == name) match {
           case -1 => this
           case i => Var(i + off)
@@ -83,7 +83,7 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
       case v: Var => v
       case Sort(level) => Sort(level.instantiate(subst))
       case Const(name, levels) => Const(name, levels.map(_.instantiate(subst)))
-      case LocalConst(of, name, value) => LocalConst(of.instantiateCore(subst), name, value.map(_.instantiateCore(subst)))
+      case LocalConst(of, name) => LocalConst(of.instantiateCore(subst), name)
       case App(a, b) => App(a.instantiateCore(subst), b.instantiateCore(subst))
       case Lam(domain, body) => Lam(domain.instantiateCore(subst), body.instantiateCore(subst))
       case Pi(domain, body) => Pi(domain.instantiateCore(subst), body.instantiateCore(subst))
@@ -154,11 +154,11 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
       case App(a, b) => s"App(${a.dump}, ${b.dump})"
       case Lam(dom, body) => s"Lam(${dom.dump}, ${body.dump})"
       case Pi(dom, body) => s"Pi(${dom.dump}, ${body.dump})"
-      case LocalConst(of, name, value) =>
+      case LocalConst(of, name) =>
         val of1 = of.prettyName.toString.replace('.', '_').filter { _.isLetterOrDigit }
         val of2 = if (of1.isEmpty || !of1.head.isLetter) s"n$of1" else of1
         val n = lcs.getOrElseUpdate(name, Stream.from(0).map(i => s"$of2$i").diff(lcs.values.toSeq).head)
-        s"LocalConst(${of.dump}, $n, ${value.map(_.dump)})"
+        s"LocalConst(${of.dump}, $n)"
       case Let(dom, value, body) => s"Let(${dom.dump}, ${value.dump}, ${body.dump})"
     }
 }
@@ -172,9 +172,8 @@ case class Sort(level: Level) extends Expr(varBound = 0, hasLocals = false) {
 case class Const(name: Name, levels: Vector[Level]) extends Expr(varBound = 0, hasLocals = false) {
   override val hashCode: Int = 37 * name.hashCode
 }
-case class LocalConst(of: Binding, name: LocalConst.Name = new LocalConst.Name,
-    value: Option[Expr] = None) extends Expr(varBound = 0, hasLocals = true) {
-  override val hashCode: Int = 4 + 37 * (of.hashCode + 37 * value.hashCode) + name.hashCode
+case class LocalConst(of: Binding, name: LocalConst.Name = new LocalConst.Name) extends Expr(varBound = 0, hasLocals = true) {
+  override val hashCode: Int = 4 + 37 * of.hashCode + name.hashCode
 }
 case class App(a: Expr, b: Expr)
   extends Expr(
@@ -241,6 +240,11 @@ trait Binders[T <: Expr] {
         }
       case _ => Some((Nil, e))
     }
+}
+
+object Let {
+  def apply(x: LocalConst, v: Expr, b: Expr): Let =
+    Let(x.of, v, b.abstr(x))
 }
 
 object Lam extends Binder[Lam] {

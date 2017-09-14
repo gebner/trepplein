@@ -16,8 +16,18 @@ class NatTest extends Specification {
       Lam(y, nat), x, Lam(y, natSucc)))
   }
 
+  val eqDef = {
+    val u = Level.Param("u")
+    val alpha = LocalConst(Binding("A", Sort(u), BinderInfo.Default))
+    val x = LocalConst(Binding("x", alpha, BinderInfo.Default))
+    val y = LocalConst(Binding("y", alpha, BinderInfo.Default))
+    IndMod(InductiveType("eq", Vector(u), Pi(alpha, alpha -->: alpha -->: Sort.Prop)), 2,
+      Vector(Name("eq", "refl") -> Pis(alpha, x)(Apps(Const("eq", Vector(u)), alpha, x, x))))
+  }
+
   def env_ =
     Environment.default
+      .addNow(eqDef)
       .addNow(IndMod(
         InductiveType(nat.name, Vector(), Sort(1)),
         0, Vector(natZero.name -> nat, natSucc.name -> (nat -->: nat))))
@@ -34,5 +44,13 @@ class NatTest extends Specification {
     tc.checkDefEq(tc.infer(t), nat) must beLike { case IsDefEq => ok }
     tc.checkDefEq(t, numeral(6)) must beLike { case IsDefEq => ok }
     tc.checkDefEq(t, numeral(7)) must beLike { case NotDefEq(_, _) => ok }
+  }
+
+  "infer zeta" in {
+    val x = LocalConst(Binding("x", nat, BinderInfo.Default))
+    val b = Let(x, numeral(0), Apps(Const("eq.refl", Vector(1)), nat, x))
+    b.hasLocals must_== false
+    val ty = tc.infer(b)
+    ty.hasLocals must_== false
   }
 }

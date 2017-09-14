@@ -180,7 +180,7 @@ class PrettyPrinter(
       case Const(name, levels) =>
         val univParams: Doc = if (levels.isEmpty) "" else "." <> pp(levels)
         Parenable(MaxPrio, "@" <> pp(name) <> univParams)
-      case LocalConst(of, _, _) => constName(of.prettyName)
+      case LocalConst(of, _) => constName(of.prettyName)
       case Lam(_, _) | Pi(_, _) =>
         parseBinders(e) { (binders, inner) => pp(binders, pp(inner)) }
       case Let(domain, value, body) =>
