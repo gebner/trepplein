@@ -3,11 +3,11 @@ package trepplein
 import scala.collection.mutable
 
 sealed trait DefEqRes {
-  def &(that: => DefEqRes) = if (this != IsDefEq) this else that
+  def &(that: => DefEqRes): DefEqRes = if (this != IsDefEq) this else that
 }
 case object IsDefEq extends DefEqRes {
   def forall(rs: Traversable[DefEqRes]): DefEqRes =
-    rs.view.collect { case r: NotDefEq => r }.headOption.getOrElse(IsDefEq)
+    rs.collectFirst { case r: NotDefEq => r }.getOrElse(IsDefEq)
 }
 final case class NotDefEq(a: Expr, b: Expr) extends DefEqRes
 
@@ -132,7 +132,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
 
   def reduceOneStep(e: Expr)(implicit transparency: Transparency): Option[Expr] =
     e match { case Apps(fn, as) => reduceOneStep(fn, as) }
-  private val reductionRuleCache = new ReductionRuleCache {
+  private implicit object reductionRuleCache extends ReductionRuleCache {
     private val instantiationCache = mutable.Map[(ReductionRule, Map[Level.Param, Level]), Expr]()
     override def instantiation(rr: ReductionRule, subst: Map[Level.Param, Level], v: => Expr): Expr =
       instantiationCache.getOrElseUpdate((rr, subst), v)
@@ -143,7 +143,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
         val major = env.reductions.major(n)
         val as = for ((a, i) <- as0.zipWithIndex)
           yield if (major(i)) whnf(a) else a
-        env.reductions.apply(Apps(fn, as))(reductionRuleCache) match {
+        env.reductions(Apps(fn, as)) match {
           case Some((result, constraints)) if constraints.forall { case (a, b) => isDefEq(a, b) } =>
             Some(result)
           case _ => None

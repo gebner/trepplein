@@ -48,7 +48,7 @@ object Modification {
 final case class AxiomMod(ax: Axiom) extends Modification {
   def name: Name = ax.name
 
-  def compile(env: PreEnvironment) = new CompiledModification {
+  def compile(env: PreEnvironment): CompiledModification = new CompiledModification {
     def check(): Unit = ax.check(env)
     def decls: Seq[Declaration] = Seq(ax)
     def rules: Seq[ReductionRule] = Seq()
@@ -59,7 +59,7 @@ final case class DefMod(defn: Definition) extends Modification {
 
   val decls = Seq(defn)
 
-  def compile(env: PreEnvironment) = new CompiledModification {
+  def compile(env: PreEnvironment): CompiledModification = new CompiledModification {
     val height: Int = defn.value.constants.view.
       flatMap(env.get).
       collect { case d: Definition => d.height }.
