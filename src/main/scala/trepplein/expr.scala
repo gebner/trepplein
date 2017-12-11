@@ -108,8 +108,24 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
       case _: Var | _: Const | _: Sort | _: LocalConst =>
     }
 
-  def foreach(f: Expr => Unit): Unit =
-    foreach_ { x => f(x); true }
+  def foreachNoDups(f: Expr => Unit): Unit = {
+    class ExprRef(val e: Expr) {
+      override def hashCode(): Int = System.identityHashCode(e)
+      override def equals(that: Any): Boolean =
+        that match { case that: ExprRef => this.e eq that.e case _ => false }
+    }
+    val seen = mutable.Set[ExprRef]()
+    foreach_ { x =>
+      val xr = new ExprRef(x)
+      if (seen.contains(xr)) {
+        false
+      } else {
+        f(x)
+        seen += xr
+        true
+      }
+    }
+  }
 
   private def buildSet[T](f: mutable.Set[T] => Unit): Set[T] = {
     val set = mutable.Set[T]()
@@ -119,7 +135,7 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
 
   def univParams: Set[Param] =
     buildSet { ps =>
-      foreach {
+      foreachNoDups {
         case Sort(level) => ps ++= level.univParams
         case Const(_, levels) => ps ++= levels.view.flatMap(_.univParams)
         case _ =>
@@ -128,7 +144,7 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
 
   def constants: Set[Name] =
     buildSet { cs =>
-      foreach {
+      foreachNoDups {
         case Const(name, _) => cs += name
         case _ =>
       }
