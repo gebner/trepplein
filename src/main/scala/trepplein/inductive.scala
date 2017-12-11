@@ -126,8 +126,6 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
   val rules: Vector[ReductionRule] =
     if (kIntroRule.isDefined)
       kIntroRule.toVector
-    else if (elimIntoProp)
-      Vector()
     else
       compiledIntros.map(_.redRule)
 
