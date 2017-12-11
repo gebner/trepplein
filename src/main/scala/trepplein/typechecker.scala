@@ -174,25 +174,40 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
     }
   }
 
+  def stuck(e: Expr): Option[Expr] = whnf(e) match {
+    case Apps(Const(n, _), as) if env.reductions.get(n).nonEmpty =>
+      val numAs = as.size
+      env.reductions.major(n).filter(_ < numAs).map(as(_)).flatMap(stuck).headOption
+    case e_ => Some(e_)
+  }
+
+  def ppError(e: Expr): Doc =
+    new PrettyPrinter(Some(this), options = PrettyOptions(showImplicits = false)).pp(e).doc
+
   def checkType(e: Expr, ty: Expr): Unit = {
     val inferredTy = infer(e)
     checkDefEq(ty, inferredTy) match {
       case IsDefEq =>
       case NotDefEq(t_, i_) =>
-        throw new IllegalArgumentException(s"wrong type: $e : $ty\ninferred type: $inferredTy\n$t_ !=def $i_")
+        throw new IllegalArgumentException(Doc.stack(
+          Doc.spread("wrong type: ", ppError(e), " : ", ppError(ty)),
+          Doc.spread("inferred type: ", ppError(inferredTy)),
+          Doc.spread(ppError(t_), " !=def ", ppError(i_)),
+          Doc.spread(Seq[Doc]("stuck on: ") ++ Seq(t_, i_).flatMap(stuck).map(ppError)))
+          .render(80))
     }
   }
   def requireDefEq(a: Expr, b: Expr): Unit =
     checkDefEq(a, b) match {
       case IsDefEq =>
       case NotDefEq(a_, b_) =>
-        throw new IllegalArgumentException(s"\n$a_ =def\n$b_")
+        throw new IllegalArgumentException(Doc.stack("", ppError(a_), "!=def", ppError(b_)).render(80))
     }
 
   def inferUniverseOfType(ty: Expr): Level =
     whnf(infer(ty)) match {
       case Sort(l) => l
-      case s => throw new IllegalArgumentException(s"not a sort: $s")
+      case s => throw new IllegalArgumentException(Doc.spread("not a sort: ", ppError(s)).render(80))
     }
 
   private val inferCache = mutable.Map[Expr, Expr]()

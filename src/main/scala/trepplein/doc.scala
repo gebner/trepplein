@@ -76,7 +76,9 @@ object Doc {
     docs.reduceLeftOption(_ <> by <> _).getOrElse(Text(""))
 
   def spread(cols: Traversable[Doc]): Doc = sep(cols, Text(" "))
+  def spread(cols: Doc*): Doc = spread(cols)
   def stack(lines: Traversable[Doc]): Doc = sep(lines, line)
+  def stack(cols: Doc*): Doc = stack(cols)
 
   def wordwrap(ds: Iterable[Doc]): Doc =
     ds.view.zipWithIndex.
