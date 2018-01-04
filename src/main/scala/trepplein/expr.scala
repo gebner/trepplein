@@ -109,19 +109,13 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
     }
 
   def foreachNoDups(f: Expr => Unit): Unit = {
-    class ExprRef(val e: Expr) {
-      override def hashCode(): Int = System.identityHashCode(e)
-      override def equals(that: Any): Boolean =
-        that match { case that: ExprRef => this.e eq that.e case _ => false }
-    }
-    val seen = mutable.Set[ExprRef]()
+    val seen = new java.util.IdentityHashMap[Expr, AnyRef]()
     foreach_ { x =>
-      val xr = new ExprRef(x)
-      if (seen.contains(xr)) {
+      if (seen.containsKey(x)) {
         false
       } else {
         f(x)
-        seen += xr
+        seen.put(x, null)
         true
       }
     }
