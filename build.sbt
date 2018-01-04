@@ -14,7 +14,7 @@ libraryDependencies += "com.github.scopt" %% "scopt" % "3.7.0"
 libraryDependencies += "org.specs2" %% "specs2-core" % "4.0.2" % "test"
 
 enablePlugins(JavaAppPackaging)
-javaOptions in Universal ++= Seq("-J-Xss30m", "-J-Xmx600m")
+javaOptions in Universal ++= Seq("-J-Xss30m")
 
 import scalariform.formatter.preferences._
 import com.typesafe.sbt.SbtScalariform.ScalariformKeys
