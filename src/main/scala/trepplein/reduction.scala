@@ -3,6 +3,7 @@ package trepplein
 import trepplein.Level.Param
 
 import scala.collection.mutable
+import scala.runtime.ScalaRunTime
 
 trait ReductionRuleCache {
   def instantiation(rr: ReductionRule, subst: Map[Param, Level], v: => Expr): Expr
@@ -64,6 +65,8 @@ final case class ReductionRule(ctx: Vector[Binding], lhs: Expr, rhs: Expr, defEq
     case Apps(hd: Const, as) => apply(hd, as)
     case _ => None
   }
+
+  override val hashCode: Int = ScalaRunTime._hashCode(this)
 }
 object ReductionRule {
   def apply(lcs: Vector[LocalConst], lhs: Expr, rhs: Expr, defEqConstraints: List[(Expr, Expr)])(implicit dummy: DummyImplicit): ReductionRule =
