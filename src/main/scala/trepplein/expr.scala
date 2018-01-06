@@ -16,21 +16,29 @@ object BinderInfo {
 }
 
 case class Binding(prettyName: Name, ty: Expr, info: BinderInfo) {
-  def abstr(off: Int, lcs: Vector[LocalConst]): Binding =
-    copy(ty = ty.abstr(off, lcs))
-
-  def instantiate(off: Int, es: Vector[Expr]): Binding =
-    copy(ty = ty.instantiate(off, es))
-
-  def instantiate(subst: Map[Param, Level]): Binding =
-    copy(ty = ty.instantiate(subst))
-  def instantiateCore(subst: Map[Param, Level]): Binding =
-    copy(ty = ty.instantiateCore(subst))
-
   def dump(implicit lcs: mutable.Map[LocalConst.Name, String]) =
     s"Binding(${prettyName.dump}, ${ty.dump}, ${info.dump})"
 
   override val hashCode: Int = prettyName.hashCode + 37 * (ty.hashCode + 37 * info.hashCode)
+}
+
+private class ExprCache extends java.util.IdentityHashMap[Expr, Expr] {
+  @inline final def getOrElseUpdate(k: Expr)(v: Expr => Expr): Expr = {
+    val cached = get(k)
+    if (cached != null) {
+      cached
+    } else {
+      val computed = v(k)
+      put(k, computed)
+      computed
+    }
+  }
+}
+private class ExprOffCache extends mutable.ArrayBuffer[ExprCache] {
+  @inline final def getOrElseUpdate(k: Expr, off: Int)(v: Expr => Expr): Expr = {
+    while (off >= size) this += new ExprCache
+    this(off).getOrElseUpdate(k)(v)
+  }
 }
 
 sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Product {
@@ -48,7 +56,9 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
 
   def abstr(lc: LocalConst): Expr = abstr(0, Vector(lc))
   def abstr(off: Int, lcs: Vector[LocalConst]): Expr =
-    this match {
+    abstrCore(off, lcs)(new ExprOffCache)
+  private def abstrCore(off: Int, lcs: Vector[LocalConst])(implicit cache: ExprOffCache): Expr =
+    cache.getOrElseUpdate(this, off) {
       case _ if !hasLocals => this
       case LocalConst(_, name) =>
         lcs.indexWhere(_.name == name) match {
@@ -56,38 +66,45 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
           case i => Var(i + off)
         }
       case App(a, b) =>
-        App(a.abstr(off, lcs), b.abstr(off, lcs))
+        App(a.abstrCore(off, lcs), b.abstrCore(off, lcs))
       case Lam(domain, body) =>
-        Lam(domain.abstr(off, lcs), body.abstr(off + 1, lcs))
+        Lam(domain.copy(ty = domain.ty.abstrCore(off, lcs)), body.abstrCore(off + 1, lcs))
       case Pi(domain, body) =>
-        Pi(domain.abstr(off, lcs), body.abstr(off + 1, lcs))
+        Pi(domain.copy(ty = domain.ty.abstrCore(off, lcs)), body.abstrCore(off + 1, lcs))
       case Let(domain, value, body) =>
-        Let(domain.abstr(off, lcs), value.abstr(off, lcs), body.abstr(off + 1, lcs))
+        Let(domain.copy(ty = domain.ty.abstrCore(off, lcs)), value.abstrCore(off, lcs), body.abstrCore(off + 1, lcs))
     }
 
   def instantiate(e: Expr): Expr = instantiate(0, Vector(e))
   def instantiate(off: Int, es: Vector[Expr]): Expr =
-    this match {
+    if (varBound <= off) this else
+      instantiateCore(off, es)(new ExprOffCache)
+  private def instantiateCore(off: Int, es: Vector[Expr])(implicit cache: ExprOffCache): Expr =
+    cache.getOrElseUpdate(this, off) {
       case _ if varBound <= off => this
       case Var(idx) => if (off <= idx && idx < off + es.size) es(idx - off) else this
-      case App(a, b) => App(a.instantiate(off, es), b.instantiate(off, es))
-      case Lam(domain, body) => Lam(domain.instantiate(off, es), body.instantiate(off + 1, es))
-      case Pi(domain, body) => Pi(domain.instantiate(off, es), body.instantiate(off + 1, es))
-      case Let(domain, value, body) => Let(domain.instantiate(off, es), value.instantiate(off, es), body.instantiate(off + 1, es))
+      case App(a, b) => App(a.instantiateCore(off, es), b.instantiateCore(off, es))
+      case Lam(domain, body) => Lam(domain.copy(ty = domain.ty.instantiateCore(off, es)), body.instantiateCore(off + 1, es))
+      case Pi(domain, body) => Pi(domain.copy(ty = domain.ty.instantiateCore(off, es)), body.instantiateCore(off + 1, es))
+      case Let(domain, value, body) => Let(
+        domain.copy(ty = domain.ty.instantiateCore(off, es)),
+        value.instantiateCore(off, es), body.instantiateCore(off + 1, es))
     }
 
   def instantiate(subst: Map[Param, Level]): Expr =
-    if (subst.forall(x => x._1 == x._2)) this else instantiateCore(subst)
-  def instantiateCore(subst: Map[Param, Level]): Expr =
-    this match {
+    if (subst.forall(x => x._1 == x._2)) this else instantiateCore(subst)(new ExprCache)
+  private def instantiateCore(subst: Map[Param, Level])(implicit cache: ExprCache): Expr =
+    cache.getOrElseUpdate(this) {
       case v: Var => v
       case Sort(level) => Sort(level.instantiate(subst))
       case Const(name, levels) => Const(name, levels.map(_.instantiate(subst)))
-      case LocalConst(of, name) => LocalConst(of.instantiateCore(subst), name)
+      case LocalConst(of, name) => LocalConst(of.copy(ty = of.ty.instantiateCore(subst)), name)
       case App(a, b) => App(a.instantiateCore(subst), b.instantiateCore(subst))
-      case Lam(domain, body) => Lam(domain.instantiateCore(subst), body.instantiateCore(subst))
-      case Pi(domain, body) => Pi(domain.instantiateCore(subst), body.instantiateCore(subst))
-      case Let(domain, value, body) => Let(domain.instantiateCore(subst), value.instantiateCore(subst), body.instantiateCore(subst))
+      case Lam(domain, body) => Lam(domain.copy(ty = domain.ty.instantiateCore(subst)), body.instantiateCore(subst))
+      case Pi(domain, body) => Pi(domain.copy(ty = domain.ty.instantiateCore(subst)), body.instantiateCore(subst))
+      case Let(domain, value, body) => Let(
+        domain.copy(ty = domain.ty.instantiateCore(subst)),
+        value.instantiateCore(subst), body.instantiateCore(subst))
     }
 
   def foreach_(f: Expr => Boolean): Unit =

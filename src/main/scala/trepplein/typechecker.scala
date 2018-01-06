@@ -242,7 +242,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
     case Lam(_, _) =>
       def go(e: Expr, ctx: List[LocalConst]): Expr = e match {
         case Lam(dom, body) =>
-          val dom_ = dom.instantiate(0, ctx.toVector)
+          val dom_ = dom.copy(ty = dom.ty.instantiate(0, ctx.toVector))
           if (shouldCheck) inferUniverseOfType(dom_.ty)
           Pi(dom, go(body, LocalConst(dom_) :: ctx))
         case _ =>
