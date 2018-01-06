@@ -76,6 +76,8 @@ class LibraryPrinter(env: PreEnvironment, notations: Map[Name, Notation],
 case class MainOpts(
     inputFile: String = "",
 
+    parallel: Boolean = true,
+
     printAllDecls: Boolean = false,
     printDecls: Seq[Name] = Seq(),
     printDependencies: Boolean = false,
@@ -95,6 +97,9 @@ object MainOpts {
   val parser = new scopt.OptionParser[MainOpts]("trepplein") {
     head("trepplein", "1.0")
     override def showUsageOnError = true
+
+    opt[Unit]('s', "sequential").action((_, c) => c.copy(parallel = false))
+      .text("type-check declarations on one thread only")
 
     opt[Unit]('a', "print-all-decls").action((_, c) => c.copy(printAllDecls = true))
       .text("print all checked declarations")
@@ -133,8 +138,11 @@ object main {
       case Some(opts) =>
         val exportedCommands = TextExportParser.parseFile(opts.inputFile)
 
-        val preEnv = exportedCommands.collect { case ExportedModification(mod) => mod }
-          .foldLeft[PreEnvironment](Environment.default)(_.add(_))
+        val modifications = exportedCommands.collect { case ExportedModification(mod) => mod }
+        val env0 = Environment.default
+        val preEnv =
+          if (opts.parallel) modifications.foldLeft[PreEnvironment](env0)(_.add(_))
+          else modifications.foldLeft[PreEnvironment](env0)(_.addNow(_))
 
         val notations = Map() ++ exportedCommands.
           collect { case ExportedNotation(not) => not.fn -> not }.
