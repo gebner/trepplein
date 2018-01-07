@@ -31,7 +31,7 @@ class NatTest extends Specification {
       .addNow(IndMod(
         InductiveType(nat.name, Vector(), Sort(1)),
         0, Vector(natZero.name -> nat, natSucc.name -> (nat -->: nat))))
-      .addNow(DefMod(Definition(natAdd.name, Vector(), nat -->: nat -->: nat, addDef)))
+      .addNow(DefMod(natAdd.name, Vector(), nat -->: nat -->: nat, addDef))
 
   def numeral(n: Int): Expr =
     if (n == 0) Const(Name("nat", "zero"), Vector())
