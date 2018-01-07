@@ -76,8 +76,20 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       red2 orElse red1
   }
 
-  @inline private def withLC[T](binding: Binding)(f: LocalConst => T): T =
-    f(LocalConst(binding))
+  private val lcCache = mutable.AnyRefMap[Expr, List[LocalConst]]().withDefaultValue(Nil)
+  private def popCachedLC(binding: Binding): LocalConst =
+    lcCache(binding.ty) match {
+      case cached :: rest =>
+        lcCache(binding.ty) = rest
+        cached
+      case Nil => LocalConst(binding)
+    }
+  @inline private def withLC[T](binding: Binding)(f: LocalConst => T): T = {
+    val lc = popCachedLC(binding)
+    val result = f(lc)
+    lcCache(binding.ty) ::= lc
+    result
+  }
 
   private def checkDefEqCore(e1_0: Expr, e2_0: Expr): DefEqRes = {
     val transparency = Transparency(rho = false)
@@ -251,9 +263,17 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
           infer(e.instantiate(0, ctxVec)).abstr(0, ctxVec)
       }
       go(e, Nil)
-    case Pis(domains, body) if domains.nonEmpty =>
-      Sort(domains.map(d => inferUniverseOfType(d.of.ty)).
-        foldRight(inferUniverseOfType(body))(Level.IMax).simplify)
+    case Pi(_, _) =>
+      def go(e: Expr, ctx: List[LocalConst]): Level = e match {
+        case Pi(dom, body) =>
+          val dom_ = dom.copy(ty = dom.ty.instantiate(0, ctx.toVector))
+          val domUniv = inferUniverseOfType(dom_.ty)
+          Level.IMax(domUniv, withLC(dom_)(lc => go(body, lc :: ctx)))
+        case _ =>
+          val ctxVec = ctx.toVector
+          inferUniverseOfType(e.instantiate(0, ctxVec))
+      }
+      Sort(go(e, Nil).simplify)
     case Let(domain, value, body) =>
       if (shouldCheck) inferUniverseOfType(domain.ty)
       if (shouldCheck) checkType(value, domain.ty)
