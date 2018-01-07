@@ -1,5 +1,7 @@
 package trepplein
 
+import java.util.function.Predicate
+
 import trepplein.Level._
 
 import scala.annotation.tailrec
@@ -40,6 +42,8 @@ private class ExprOffCache extends mutable.ArrayBuffer[ExprCache] {
     this(off).getOrElseUpdate(k)(v)
   }
 }
+
+private object Breadcrumb
 
 sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Product {
   def hasVar(i: Int): Boolean =
@@ -107,8 +111,8 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
         value.instantiateCore(subst), body.instantiateCore(subst))
     }
 
-  def foreach_(f: Expr => Boolean): Unit =
-    if (f(this)) this match {
+  def foreach_(f: Predicate[Expr]): Unit =
+    if (f.test(this)) this match {
       case App(a, b) =>
         a.foreach_(f)
         b.foreach_(f)
@@ -126,14 +130,13 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
     }
 
   @inline final def foreachNoDups(f: Expr => Unit): Unit = {
-    val seen = new java.util.IdentityHashMap[Expr, AnyRef]()
+    val seen = new java.util.IdentityHashMap[Expr, Breadcrumb.type]()
     foreach_ { x =>
-      if (seen.containsKey(x)) {
-        false
-      } else {
+      if (seen.put(x, Breadcrumb) == null) {
         f(x)
-        seen.put(x, null)
         true
+      } else {
+        false
       }
     }
   }
