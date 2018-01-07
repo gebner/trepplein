@@ -224,9 +224,10 @@ class PrettyPrinter(
       go(binders, value, Nil)
     }
 
-  def pp(decl: Declaration): Doc =
-    decl match {
-      case Definition(name, univParams, ty, value, _) =>
+  def pp(decl: Declaration, env: PreEnvironment): Doc = {
+    val Declaration(name, univParams, ty, _, builtin) = decl
+    env.value(name) match {
+      case Some(value) =>
         val ups: Doc = if (univParams.isEmpty) "" else " " <> pp(univParams)
         val isProp = typeChecker.exists(_.isProposition(ty))
         parseParams(ty, value) { (params, tyBinders, ty, value) =>
@@ -235,7 +236,7 @@ class PrettyPrinter(
           cmd <> ups <+> nest(nest(wordwrap(pp(name) :: telescope(params))) <+>
             ":" </> pp(tyBinders, pp(ty)).parens(0).group <+> ":=") </> ppVal <> line
         }
-      case Axiom(name, univParams, ty, builtin) =>
+      case None =>
         val ups: Doc = if (univParams.isEmpty) "" else " " <> pp(univParams)
         val doc = parseBinders(ty) { (binders, ty) =>
           val (params, rest) = splitListWhile(binders)(_.isForall)
@@ -244,6 +245,7 @@ class PrettyPrinter(
         }
         if (builtin) "/- builtin -/" <+> doc else doc
     }
+  }
 }
 
 object pretty {

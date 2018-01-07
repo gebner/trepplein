@@ -3,7 +3,7 @@ package trepplein
 import trepplein.Level.Param
 
 final case class InductiveType(name: Name, univParams: Vector[Level.Param], ty: Expr) {
-  val decl = Axiom(name, univParams, ty, builtin = true)
+  val decl = Declaration(name, univParams, ty, builtin = true)
 }
 
 final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends CompiledModification {
@@ -104,7 +104,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
   val majorPremise = LocalConst(Binding("x", Apps(indTy, params ++ indices), BinderInfo.Default))
   val elimType: Expr = Pis(params ++ Seq(motive) ++ minorPremises ++ indices :+ majorPremise)(mkMotiveApp(indices, majorPremise))
   val elimLevelParams: Vector[Param] = extraElimLevelParams ++ univParams
-  val elimDecl = Axiom(Name.Str(name, "rec"), elimLevelParams, elimType, builtin = true)
+  val elimDecl = Declaration(Name.Str(name, "rec"), elimLevelParams, elimType, builtin = true)
 
   val kIntroRule: Option[ReductionRule] =
     compiledIntros match {
@@ -118,11 +118,11 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
       case _ => None
     }
 
-  val introDecls: Vector[Axiom] =
+  val introDecls: Vector[Declaration] =
     for (i <- compiledIntros)
-      yield Axiom(i.name, univParams, i.ty, builtin = true)
+      yield Declaration(i.name, univParams, i.ty, builtin = true)
 
-  val decls: Vector[Declaration] = Axiom(name, univParams, inductiveType.ty, builtin = true) +: introDecls :+ elimDecl
+  val decls: Vector[Declaration] = Declaration(name, univParams, inductiveType.ty, builtin = true) +: introDecls :+ elimDecl
   val rules: Vector[ReductionRule] =
     if (kIntroRule.isDefined)
       kIntroRule.toVector

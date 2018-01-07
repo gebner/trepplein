@@ -99,8 +99,8 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
 
   def modification: Rule1[Modification] =
     rule {
-      "#AX " ~ nameRef ~ " " ~ exprRef ~ univParams ~> ((n, t, ps) => AxiomMod(Axiom(n, ps, t))) |
-        "#DEF " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ univParams ~> ((n, t, v, ps) => DefMod(Definition(n, ps, t, v))) |
+      "#AX " ~ nameRef ~ " " ~ exprRef ~ univParams ~> ((n, t, ps) => AxiomMod(n, ps, t)) |
+        "#DEF " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ univParams ~> ((n, t, v, ps) => DefMod(n, ps, t, v)) |
         "#QUOT" ~ push(QuotMod) |
         "#IND " ~ int ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ int ~ restNums ~> parseInd _
     }

@@ -19,14 +19,11 @@ class LibraryPrinter(env: PreEnvironment, notations: Map[Name, Notation],
     val decl = env(name)
     if (printDependencies) {
       decl.ty.constants.foreach(printDecl)
-      decl match {
-        case decl: Definition if !prettyOptions.hideProofs || !tc.isProposition(decl.ty) =>
-          decl.value.constants.foreach(printDecl)
-        case _ =>
-      }
+      if (!prettyOptions.hideProofs || !tc.isProposition(decl.ty))
+        env.value(name).foreach(_.constants.foreach(printDecl))
     }
 
-    var doc = pp.pp(decl)
+    var doc = pp.pp(decl, env)
 
     val reds = env.reductions.get(name)
     if (printReductions && reds.nonEmpty) {
@@ -47,12 +44,10 @@ class LibraryPrinter(env: PreEnvironment, notations: Map[Name, Notation],
 
   private val axiomsChecked = mutable.Map[Name, Unit]()
   def checkAxioms(name: Name): Unit = axiomsChecked.getOrElseUpdate(name, env(name) match {
-    case Definition(_, _, ty, value, _) =>
+    case Declaration(_, _, ty, _, _) =>
       ty.constants.foreach(checkAxioms)
-      value.constants.foreach(checkAxioms)
-    case Axiom(_, _, ty, _) =>
-      ty.constants.foreach(checkAxioms)
-      printDecl(name)
+      env.value(name).view.flatMap(_.constants).foreach(checkAxioms)
+      if (env.isAxiom(name)) printDecl(name)
     // TODO: inductive, quotient
   })
 

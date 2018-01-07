@@ -55,12 +55,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
 
   def defHeight(fn: Expr, as: List[Expr]): Int =
     fn match {
-      case Const(n, _) =>
-        env.get(n) match {
-          case Some(defn: Definition) => defn.height + 1
-          case Some(_) => 1
-          case None => 0
-        }
+      case Const(n, _) => env.get(n).map(_.height + 1).getOrElse(0)
       case _ => 0
     }
 
