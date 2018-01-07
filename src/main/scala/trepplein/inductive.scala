@@ -122,7 +122,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
     for (i <- compiledIntros)
       yield Axiom(i.name, univParams, i.ty, builtin = true)
 
-  val decls: Vector[Declaration] = Axiom(name, univParams, inductiveType.ty) +: introDecls :+ elimDecl
+  val decls: Vector[Declaration] = Axiom(name, univParams, inductiveType.ty, builtin = true) +: introDecls :+ elimDecl
   val rules: Vector[ReductionRule] =
     if (kIntroRule.isDefined)
       kIntroRule.toVector
