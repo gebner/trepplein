@@ -1,5 +1,6 @@
 package trepplein
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 
 sealed trait DefEqRes {
@@ -23,7 +24,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
         case f => Some((Nil, f))
       }
 
-    def instantiate(e: Expr, ts: List[Expr], ctx: List[Expr] = Nil): Expr =
+    @tailrec def instantiate(e: Expr, ts: List[Expr], ctx: List[Expr] = Nil): Expr =
       (e, ts) match {
         case (Pi(_, body), t :: ts_) =>
           instantiate(body, ts_, t :: ctx)
@@ -166,12 +167,12 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
 
   private val whnfCache = mutable.AnyRefMap[Expr, Expr]()
   def whnf(e: Expr): Expr = whnfCache.getOrElseUpdate(e, whnfCore(e)(Transparency.all))
-  def whnfCore(e: Expr)(implicit transparency: Transparency = Transparency.all): Expr = {
+  @tailrec final def whnfCore(e: Expr)(implicit transparency: Transparency = Transparency.all): Expr = {
     val Apps(fn, as) = e
     fn match {
       case Sort(l) => Sort(l.simplify)
       case Lam(_, _) if as.nonEmpty =>
-        def go(fn: Expr, ctx: List[Expr], as: List[Expr]): Expr =
+        @tailrec def go(fn: Expr, ctx: List[Expr], as: List[Expr]): Expr =
           (fn, as) match {
             case (Lam(_, fn_), a :: as_) => go(fn_, a :: ctx, as_)
             case _ => Apps(fn.instantiate(0, ctx.toVector), as)
@@ -238,7 +239,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
     case LocalConst(of, _) =>
       of.ty
     case Apps(fn, as) if as.nonEmpty =>
-      def go(fnt: Expr, as: List[Expr], ctx: List[Expr]): Expr =
+      @tailrec def go(fnt: Expr, as: List[Expr], ctx: List[Expr]): Expr =
         (fnt, as) match {
           case (_, Nil) => fnt.instantiate(0, ctx.toVector)
           case (Pi(dom, body), a :: as_) =>

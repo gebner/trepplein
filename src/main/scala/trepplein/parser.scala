@@ -23,7 +23,7 @@ private class TextExportParser {
   name += Name.Anon
   level += Level.Zero
 
-  def write[T](b: mutable.ArrayBuffer[T], i: Int, t: T, default: => T): Unit =
+  @tailrec final def write[T](b: mutable.ArrayBuffer[T], i: Int, t: T, default: => T): Unit =
     b.size match {
       case `i` => b += t
       case s if s < i =>

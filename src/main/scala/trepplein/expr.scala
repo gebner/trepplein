@@ -46,7 +46,7 @@ private class ExprOffCache extends mutable.ArrayBuffer[ExprCache] {
 private object Breadcrumb
 
 sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Product {
-  def hasVar(i: Int): Boolean =
+  final def hasVar(i: Int): Boolean =
     this match {
       case _ if varBound <= i => false
       case Var(idx) => idx == i
@@ -111,7 +111,7 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
         value.instantiateCore(subst), body.instantiateCore(subst))
     }
 
-  def foreach_(f: Predicate[Expr]): Unit =
+  final def foreach_(f: Predicate[Expr]): Unit =
     if (f.test(this)) this match {
       case App(a, b) =>
         a.foreach_(f)
