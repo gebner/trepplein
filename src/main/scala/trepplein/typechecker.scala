@@ -3,7 +3,7 @@ package trepplein
 import scala.collection.mutable
 
 sealed trait DefEqRes {
-  def &(that: => DefEqRes): DefEqRes = if (this != IsDefEq) this else that
+  @inline final def &(that: => DefEqRes): DefEqRes = if (this != IsDefEq) this else that
 }
 case object IsDefEq extends DefEqRes {
   def forall(rs: Traversable[DefEqRes]): DefEqRes =
@@ -33,7 +33,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       }
   }
 
-  private val levelDefEqCache = mutable.Map[(Level, Level), Boolean]()
+  private val levelDefEqCache = mutable.AnyRefMap[(Level, Level), Boolean]()
   def isDefEq(a: Level, b: Level): Boolean =
     levelDefEqCache.getOrElseUpdate((a, b), a === b)
 
@@ -67,8 +67,8 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
     val Apps(fn1, as1) = e1
     val Apps(fn2, as2) = e2
 
-    def red1 = reduceOneStep(fn1, as1).map(_ -> e2)
-    def red2 = reduceOneStep(fn2, as2).map(e1 -> _)
+    @inline def red1 = reduceOneStep(fn1, as1).map(_ -> e2)
+    @inline def red2 = reduceOneStep(fn2, as2).map(e1 -> _)
 
     if (defHeight(fn1, as1) > defHeight(fn2, as2))
       red1 orElse red2
@@ -116,7 +116,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
     }
   }
 
-  private val defEqCache = mutable.Map[(Expr, Expr), DefEqRes]()
+  private val defEqCache = mutable.AnyRefMap[(Expr, Expr), DefEqRes]()
   // requires that e1 and e2 have the same type, or are types
   def checkDefEq(e1: Expr, e2: Expr): DefEqRes =
     if (e1.eq(e2) || e1 == e2) IsDefEq else defEqCache.getOrElseUpdate((e1, e2), {
@@ -133,7 +133,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
   def reduceOneStep(e: Expr)(implicit transparency: Transparency): Option[Expr] =
     e match { case Apps(fn, as) => reduceOneStep(fn, as) }
   private implicit object reductionRuleCache extends ReductionRuleCache {
-    private val instantiationCache = mutable.Map[(ReductionRule, Map[Level.Param, Level]), Expr]()
+    private val instantiationCache = mutable.AnyRefMap[(ReductionRule, Map[Level.Param, Level]), Expr]()
     override def instantiation(rr: ReductionRule, subst: Map[Level.Param, Level], v: => Expr): Expr =
       instantiationCache.getOrElseUpdate((rr, subst), v)
   }
@@ -151,7 +151,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       case _ => None
     }
 
-  private val whnfCache = mutable.Map[Expr, Expr]()
+  private val whnfCache = mutable.AnyRefMap[Expr, Expr]()
   def whnf(e: Expr): Expr = whnfCache.getOrElseUpdate(e, whnfCore(e)(Transparency.all))
   def whnfCore(e: Expr)(implicit transparency: Transparency = Transparency.all): Expr = {
     val Apps(fn, as) = e
@@ -210,7 +210,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       case s => throw new IllegalArgumentException(Doc.spread("not a sort: ", ppError(s)).render(80))
     }
 
-  private val inferCache = mutable.Map[Expr, Expr]()
+  private val inferCache = mutable.AnyRefMap[Expr, Expr]()
   def infer(e: Expr): Expr = inferCache.getOrElseUpdate(e, e match {
     case Var(_) =>
       throw new IllegalArgumentException

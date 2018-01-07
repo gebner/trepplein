@@ -13,6 +13,11 @@ libraryDependencies += "org.parboiled" %% "parboiled" % "2.1.4"
 libraryDependencies += "com.github.scopt" %% "scopt" % "3.7.0"
 libraryDependencies += "org.specs2" %% "specs2-core" % "4.0.2" % "test"
 
+scalacOptions ++= {
+  if (!scalaVersion.value.startsWith("2.12.")) Seq()
+  else Seq("-opt:l:inline", "-opt-inline-from:**", "-opt-warnings")
+}
+
 enablePlugins(JavaAppPackaging)
 javaOptions in Universal ++= Seq("-J-Xss30m")
 

@@ -125,7 +125,7 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
       case _: Var | _: Const | _: Sort | _: LocalConst =>
     }
 
-  def foreachNoDups(f: Expr => Unit): Unit = {
+  @inline final def foreachNoDups(f: Expr => Unit): Unit = {
     val seen = new java.util.IdentityHashMap[Expr, AnyRef]()
     foreach_ { x =>
       if (seen.containsKey(x)) {
@@ -138,7 +138,7 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
     }
   }
 
-  private def buildSet[T](f: mutable.Set[T] => Unit): Set[T] = {
+  @inline private def buildSet[T](f: mutable.Set[T] => Unit): Set[T] = {
     val set = mutable.Set[T]()
     f(set)
     set.toSet
