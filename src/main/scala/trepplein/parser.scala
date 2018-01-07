@@ -1,7 +1,13 @@
 package trepplein
 
+import java.io.{ BufferedInputStream, FileInputStream }
+import java.nio.ByteBuffer
+import java.util.Arrays
+
+import org.parboiled2.ParserInput.{ ByteArrayBasedParserInput, DefaultParserInput }
 import org.parboiled2._
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.{ Failure, Success }
 
@@ -31,10 +37,11 @@ private class TextExportParser {
 private class LineParser(val textExportParser: TextExportParser, val input: ParserInput) extends Parser {
   import textExportParser._
 
-  def int: Rule1[Int] = rule { capture(oneOrMore(CharPredicate.Digit)) ~> ((x: String) => x.toInt) }
-  def long: Rule1[Long] = rule { capture(oneOrMore(CharPredicate.Digit)) ~> ((x: String) => x.toLong) }
+  val digit: CharPredicate = CharPredicate.from(d => '0' <= d && d <= '9')
+  def int: Rule1[Int] = rule { capture(oneOrMore(digit)) ~> ((x: String) => x.toInt) }
+  def long: Rule1[Long] = rule { capture(oneOrMore(digit)) ~> ((x: String) => x.toLong) }
 
-  def rest: Rule1[String] = rule { capture(zeroOrMore(ANY)) }
+  def rest: Rule1[String] = rule { capture(zeroOrMore(CharPredicate.from(_ != '\n'))) }
 
   def restNums: Rule1[Seq[Int]] = rule { zeroOrMore(" " ~ int) }
 
@@ -99,30 +106,68 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
       numParams, intros.grouped(2).map { case Seq(in, it) => (name(in), expr(it)) }.toVector)
   }
 
-  def line: Rule1[Option[ExportFileCommand]] =
+  def lineContent: Rule1[Option[ExportFileCommand]] =
     rule {
-      (int ~ " " ~ (nameDef ~> { (i: Int, n: Name) => write(name, i, n, Name.Anon); None } |
+      int ~ " " ~ (nameDef ~> { (i: Int, n: Name) => write(name, i, n, Name.Anon); None } |
         exprDef ~> { (i: Int, e: Expr) => write(expr, i, e, Sort(0)); None } |
         levelDef ~> { (i: Int, l: Level) => write(level, i, l, Level.Zero); None }) |
         notationDef ~> ((x: Notation) => Some(ExportedNotation(x))) |
-        modification ~> ((x: Modification) => Some(ExportedModification(x)))) ~ EOI
+        modification ~> ((x: Modification) => Some(ExportedModification(x)))
     }
+
+  def lineWithoutNL: Rule1[Option[ExportFileCommand]] = rule { lineContent ~ EOI }
+
+  def lines: Rule1[Seq[ExportFileCommand]] = rule {
+    ((lineContent ~ "\n").* ~> ((cmds: Seq[Option[ExportFileCommand]]) => cmds.flatten)) ~ EOI
+  }
 }
 
 object TextExportParser {
-  def parse(lines: Stream[String]): Stream[ExportFileCommand] = {
+  @tailrec
+  private def reverseIndexOf(chunk: Array[Byte], needle: Byte, from: Int): Int =
+    if (chunk(from) == needle) from
+    else if (from == 0) -1
+    else reverseIndexOf(chunk, needle, from - 1)
+
+  private class Chunk(bytes: Array[Byte], endIndex: Int) extends DefaultParserInput {
+    val length: Int = endIndex
+    def charAt(ix: Int): Char = (bytes(ix) & 0xFF).toChar
+    def sliceString(start: Int, end: Int) =
+      new String(bytes, start, math.max(end - start, 0), UTF8)
+    def sliceCharArray(start: Int, end: Int): Array[Char] =
+      UTF8.decode(ByteBuffer.wrap(java.util.Arrays.copyOfRange(bytes, start, end))).array()
+  }
+
+  def parseFile(fn: String): Stream[ExportFileCommand] = {
+    val in = new FileInputStream(fn)
+    def bufSize = 8 << 10
+    def readChunksCore(buf: Array[Byte], begin: Int): Stream[Chunk] = {
+      val len = in.read(buf, begin, buf.length - begin)
+      if (len <= 0) Stream.empty else {
+        val nl = reverseIndexOf(buf, '\n', begin + len - 1)
+        if (nl == -1) {
+          // no newline found in the whole chunk,
+          // this should only happen at the end but let's try again to make sure
+          new Chunk(buf, len) #:: readChunks()
+        } else {
+          val nextBuf = new Array[Byte](bufSize)
+          val reuse = (begin + len) - (nl + 1)
+          System.arraycopy(buf, nl + 1, nextBuf, 0, reuse)
+          new Chunk(buf, nl + 1) #:: readChunksCore(nextBuf, reuse)
+        }
+      }
+    }
+    def readChunks(): Stream[Chunk] = readChunksCore(new Array[Byte](bufSize), 0)
     val parser = new TextExportParser
-    lines.flatMap { l =>
-      val lineParser = new LineParser(parser, l)
-      lineParser.line.run() match {
-        case Success(mods) => mods
+    readChunks().flatMap { chunk =>
+      val lineParser = new LineParser(parser, chunk)
+      lineParser.lines.run() match {
+        case Success(mods) =>
+          mods
         case Failure(error: ParseError) =>
           throw new IllegalArgumentException(lineParser.formatError(error))
         case Failure(ex) => throw ex
       }
     }
   }
-
-  def parseFile(fn: String): Stream[ExportFileCommand] =
-    parse(io.Source.fromFile(fn).getLines().toStream)
 }
