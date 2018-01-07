@@ -76,6 +76,9 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
       red2 orElse red1
   }
 
+  @inline private def withLC[T](binding: Binding)(f: LocalConst => T): T =
+    f(LocalConst(binding))
+
   private def checkDefEqCore(e1_0: Expr, e2_0: Expr): DefEqRes = {
     val transparency = Transparency(rho = false)
     val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(transparency)
@@ -91,8 +94,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
         checkArgs
       case (Lam(dom, b1), Lam(_, b2)) =>
         require(as1.isEmpty && as2.isEmpty)
-        val lc = LocalConst(dom)
-        return checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc))
+        return withLC(dom)(lc => checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc)))
       case (Lam(dom1, _), _) =>
         require(as1.isEmpty)
         return checkDefEqCore(e1, Lam(dom1, App(e2, Var(0))))
@@ -100,9 +102,8 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
         require(as2.isEmpty)
         return checkDefEqCore(Lam(dom2, App(e1, Var(0))), e2)
       case (Pi(dom1, b1), Pi(dom2, b2)) =>
-        val lc = LocalConst(dom1)
         require(as1.isEmpty && as2.isEmpty)
-        return checkDefEq(dom1.ty, dom2.ty) & checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc))
+        return checkDefEq(dom1.ty, dom2.ty) & withLC(dom1)(lc => checkDefEqCore(b1.instantiate(lc), b2.instantiate(lc)))
       case (_, _) =>
         NotDefEq(e1, e2)
     }) match {
@@ -244,7 +245,7 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
         case Lam(dom, body) =>
           val dom_ = dom.copy(ty = dom.ty.instantiate(0, ctx.toVector))
           if (shouldCheck) inferUniverseOfType(dom_.ty)
-          Pi(dom, go(body, LocalConst(dom_) :: ctx))
+          Pi(dom, withLC(dom_)(lc => go(body, lc :: ctx)))
         case _ =>
           val ctxVec = ctx.toVector
           infer(e.instantiate(0, ctxVec)).abstr(0, ctxVec)
