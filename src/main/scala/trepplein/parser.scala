@@ -37,9 +37,15 @@ private class TextExportParser {
 private class LineParser(val textExportParser: TextExportParser, val input: ParserInput) extends Parser {
   import textExportParser._
 
-  val digit: CharPredicate = CharPredicate.from(d => '0' <= d && d <= '9')
-  def int: Rule1[Int] = rule { capture(oneOrMore(digit)) ~> ((x: String) => x.toInt) }
+  def digit: Rule0 = rule { test('0' <= cursorChar && cursorChar <= '9') ~ ANY }
   def long: Rule1[Long] = rule { capture(oneOrMore(digit)) ~> ((x: String) => x.toLong) }
+
+  @tailrec private def parseIntCore(from: Int, to: Int, acc: Int): Int =
+    if (from == to) acc else parseIntCore(from + 1, to, 10 * acc + (input.charAt(from) - '0'))
+  def int: Rule1[Int] = rule {
+    push(cursor) ~ oneOrMore(digit) ~ push(cursor) ~>
+      ((from: Int, to: Int) => parseIntCore(from, to, 0))
+  }
 
   def rest: Rule1[String] = rule { capture(zeroOrMore(CharPredicate.from(_ != '\n'))) }
 
