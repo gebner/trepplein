@@ -21,15 +21,14 @@ class NatTest extends Specification {
     val alpha = LocalConst(Binding("A", Sort(u), BinderInfo.Default))
     val x = LocalConst(Binding("x", alpha, BinderInfo.Default))
     val y = LocalConst(Binding("y", alpha, BinderInfo.Default))
-    IndMod(InductiveType("eq", Vector(u), Pi(alpha, alpha -->: alpha -->: Sort.Prop)), 2,
+    IndMod("eq", Vector(u), Pi(alpha, alpha -->: alpha -->: Sort.Prop), 2,
       Vector(Name("eq", "refl") -> Pis(alpha, x)(Apps(Const("eq", Vector(u)), alpha, x, x))))
   }
 
   def env_ =
     Environment.default
       .addNow(eqDef)
-      .addNow(IndMod(
-        InductiveType(nat.name, Vector(), Sort(1)),
+      .addNow(IndMod(nat.name, Vector(), Sort(1),
         0, Vector(natZero.name -> nat, natSucc.name -> (nat -->: nat))))
       .addNow(DefMod(natAdd.name, Vector(), nat -->: nat -->: nat, addDef))
 

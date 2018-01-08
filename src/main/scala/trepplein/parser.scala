@@ -108,7 +108,7 @@ private class LineParser(val textExportParser: TextExportParser, val input: Pars
   def parseInd(numParams: Int, n: Name, t: Expr, numIntros: Int, rest: Seq[Int]): IndMod = {
     val (intros, ps) = rest.splitAt(2 * numIntros)
     IndMod(
-      InductiveType(n, ps.view.map(name).map(Level.Param).toVector, t),
+      n, ps.view.map(name).map(Level.Param).toVector, t,
       numParams, intros.grouped(2).map { case Seq(in, it) => (name(in), expr(it)) }.toVector)
   }
 

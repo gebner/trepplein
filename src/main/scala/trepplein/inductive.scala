@@ -2,25 +2,19 @@ package trepplein
 
 import trepplein.Level.Param
 
-final case class InductiveType(name: Name, univParams: Vector[Level.Param], ty: Expr) {
-  val decl = Declaration(name, univParams, ty, builtin = true)
-}
-
 final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends CompiledModification {
   import indMod._
-  val tc = new TypeChecker(env.addNow(inductiveType.decl))
+  val tc = new TypeChecker(env.addNow(decl))
   import tc.NormalizedPis
 
-  def name: Name = inductiveType.name
+  def name: Name = indMod.name
+  def univParams: Vector[Param] = indMod.univParams
+  val indTy = Const(name, univParams)
 
-  def univParams: Vector[Param] = inductiveType.univParams
-  val indTy = Const(inductiveType.name, univParams)
-
-  val ((params, indices), level) =
-    inductiveType.ty match {
-      case NormalizedPis(doms, Sort(lvl)) =>
-        (doms.splitAt(numParams), lvl)
-    }
+  val ((params, indices), level) = ty match {
+    case NormalizedPis(doms, Sort(lvl)) =>
+      (doms.splitAt(numParams), lvl)
+  }
   val indTyWParams = Apps(indTy, params)
 
   case class CompiledIntro(name: Name, ty: Expr) {
@@ -30,7 +24,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
     type ArgInfo = Either[Expr, (List[LocalConst], List[Expr])]
 
     val argInfos: List[ArgInfo] = arguments.map {
-      case LocalConst(Binding(_, NormalizedPis(eps, Apps(recArgIndTy @ Const(inductiveType.name, _), recArgs)), _), _) =>
+      case LocalConst(Binding(_, NormalizedPis(eps, Apps(recArgIndTy @ Const(indMod.name, _), recArgs)), _), _) =>
         require(recArgs.size >= numParams)
         tc.requireDefEq(Apps(recArgIndTy, recArgs.take(numParams)), indTyWParams)
         Right((eps, recArgs.drop(numParams)))
@@ -122,7 +116,7 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
     for (i <- compiledIntros)
       yield Declaration(i.name, univParams, i.ty, builtin = true)
 
-  val decls: Vector[Declaration] = Declaration(name, univParams, inductiveType.ty, builtin = true) +: introDecls :+ elimDecl
+  val decls: Vector[Declaration] = Declaration(name, univParams, ty, builtin = true) +: introDecls :+ elimDecl
   val rules: Vector[ReductionRule] =
     if (kIntroRule.isDefined)
       kIntroRule.toVector
@@ -130,16 +124,17 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
       compiledIntros.map(_.redRule)
 
   def check(): Unit = {
-    val withType = env.addNow(inductiveType.decl)
-    val withIntros = introDecls.foldLeft(withType)((env, i) => { i.check(withType); env.addNow(i) })
+    val withType = env.addNow(decl)
+    val withIntros = introDecls.foldLeft(withType) { (env, i) => i.check(withType); env.addNow(i) }
     withIntros.addNow(elimDecl)
 
     for (i <- compiledIntros) i.check()
   }
 }
 
-final case class IndMod(inductiveType: InductiveType, numParams: Int, intros: Vector[(Name, Expr)]) extends Modification {
-  def name: Name = inductiveType.name
+final case class IndMod(name: Name, univParams: Vector[Level.Param], ty: Expr,
+    numParams: Int, intros: Vector[(Name, Expr)]) extends Modification {
+  val decl = Declaration(name, univParams, ty, builtin = true)
 
   def compile(env: PreEnvironment) = CompiledIndMod(this, env)
 }
