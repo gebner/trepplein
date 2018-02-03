@@ -9,7 +9,6 @@ version := "1.0"
 scalaVersion := "2.12.4"
 crossScalaVersions := Seq("2.11.7")
 
-libraryDependencies += "org.parboiled" %% "parboiled" % "2.1.4"
 libraryDependencies += "com.github.scopt" %% "scopt" % "3.7.0"
 libraryDependencies += "org.specs2" %% "specs2-core" % "4.0.2" % "test"
 

@@ -1,15 +1,10 @@
 package trepplein
 
-import java.io.{ BufferedInputStream, FileInputStream }
-import java.nio.ByteBuffer
-import java.util.Arrays
-
-import org.parboiled2.ParserInput.{ ByteArrayBasedParserInput, DefaultParserInput }
-import org.parboiled2._
+import java.io.{ FileInputStream, InputStream }
+import java.nio.charset.Charset
 
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.util.{ Failure, Success }
 
 sealed trait ExportFileCommand
 case class ExportedModification(modification: Modification) extends ExportFileCommand
@@ -23,7 +18,7 @@ private class TextExportParser {
   name += Name.Anon
   level += Level.Zero
 
-  @tailrec final def write[T](b: mutable.ArrayBuffer[T], i: Int, t: T, default: => T): Unit =
+  @tailrec final def write[T](b: mutable.ArrayBuffer[T], i: Int, t: T, default: T): Unit =
     b.size match {
       case `i` => b += t
       case s if s < i =>
@@ -34,119 +29,185 @@ private class TextExportParser {
     }
 }
 
-private class LineParser(val textExportParser: TextExportParser, val input: ParserInput) extends Parser {
+private final class LinesParser(textExportParser: TextExportParser, bytes: Array[Byte], end: Int) {
   import textExportParser._
 
-  def digit: Rule0 = rule { test('0' <= cursorChar && cursorChar <= '9') ~ ANY }
-  def long: Rule1[Long] = rule { capture(oneOrMore(digit)) ~> ((x: String) => x.toLong) }
-
-  @tailrec private def parseIntCore(from: Int, to: Int, acc: Int): Int =
-    if (from == to) acc else parseIntCore(from + 1, to, 10 * acc + (input.charAt(from) - '0'))
-  def int: Rule1[Int] = rule {
-    push(cursor) ~ oneOrMore(digit) ~ push(cursor) ~>
-      ((from: Int, to: Int) => parseIntCore(from, to, 0))
+  var index = 0
+  def hasNext(): Boolean = index < end
+  def cur(): Char = bytes(index).toChar
+  def next(): Char = {
+    if (!hasNext()) throw new IndexOutOfBoundsException
+    val c = cur()
+    index += 1
+    c
   }
 
-  def rest: Rule1[String] = rule { capture(zeroOrMore(CharPredicate.from(_ != '\n'))) }
+  def consume(c: Char): Unit = if (next() != c) throw new IllegalArgumentException(s"expected $c, got ${cur()}")
+  def consume(s: String): Unit = s.foreach(consume)
 
-  def restNums: Rule1[Seq[Int]] = rule { zeroOrMore(" " ~ int) }
-
-  def binderInfo: Rule1[BinderInfo] =
-    rule {
-      "#BD" ~ push(BinderInfo.Default) |
-        "#BI" ~ push(BinderInfo.Implicit) |
-        "#BC" ~ push(BinderInfo.InstImplicit) |
-        "#BS" ~ push(BinderInfo.StrictImplicit)
-    }
-
-  def nameRef: Rule1[Name] = rule { int ~> name }
-  def levelRef: Rule1[Level] = rule { int ~> level }
-  def exprRef: Rule1[Expr] = rule { int ~> expr }
-
-  def nameDef: Rule1[Name] =
-    rule {
-      "#NS " ~ nameRef ~ " " ~ rest ~> Name.Str |
-        "#NI " ~ nameRef ~ " " ~ long ~> Name.Num
-    }
-
-  def levelDef: Rule1[Level] =
-    rule {
-      "#US " ~ levelRef ~> Level.Succ |
-        "#UM " ~ levelRef ~ " " ~ levelRef ~> (Level.Max(_, _)) |
-        "#UIM " ~ levelRef ~ " " ~ levelRef ~> Level.IMax |
-        "#UP " ~ nameRef ~> Level.Param
-    }
-
-  def exprDef: Rule1[Expr] =
-    rule {
-      "#EV " ~ int ~> Var |
-        "#ES " ~ levelRef ~> ((l: Level) => Sort(l)) |
-        "#EC " ~ nameRef ~ restNums ~> ((n, ls) => Const(n, ls.map(level).toVector)) |
-        "#EA " ~ exprRef ~ " " ~ exprRef ~> App |
-        "#EL " ~ binderInfo ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((b, n, t, e) => Lam(Binding(n, t, b), e)) |
-        "#EP " ~ binderInfo ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((b, n, t, e) => Pi(Binding(n, t, b), e)) |
-        "#EZ " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ " " ~ exprRef ~> ((n: Name, t: Expr, v: Expr, b: Expr) => Let(Binding(n, t, BinderInfo.Default), v, b))
-    }
-
-  def notationDef: Rule1[Notation] =
-    rule {
-      "#INFIX " ~ nameRef ~ " " ~ int ~ " " ~ rest ~> ((n: Name, p: Int, text: String) => Infix(n, p, text)) |
-        "#POSTFIX " ~ nameRef ~ " " ~ int ~ " " ~ rest ~> ((n: Name, p: Int, text: String) => Postfix(n, p, text)) |
-        "#PREFIX " ~ nameRef ~ " " ~ int ~ " " ~ rest ~> ((n: Name, p: Int, text: String) => Prefix(n, p, text))
-    }
-
-  def univParams: Rule1[Vector[Level.Param]] = rule { restNums ~> ((ps: Seq[Int]) => ps.view.map(name).map(Level.Param).toVector) }
-
-  def modification: Rule1[Modification] =
-    rule {
-      "#AX " ~ nameRef ~ " " ~ exprRef ~ univParams ~> ((n, t, ps) => AxiomMod(n, ps, t)) |
-        "#DEF " ~ nameRef ~ " " ~ exprRef ~ " " ~ exprRef ~ univParams ~> ((n, t, v, ps) => DefMod(n, ps, t, v)) |
-        "#QUOT" ~ push(QuotMod) |
-        "#IND " ~ int ~ " " ~ nameRef ~ " " ~ exprRef ~ " " ~ int ~ restNums ~> parseInd _
-    }
-
-  def parseInd(numParams: Int, n: Name, t: Expr, numIntros: Int, rest: Seq[Int]): IndMod = {
-    val (intros, ps) = rest.splitAt(2 * numIntros)
-    IndMod(
-      n, ps.view.map(name).map(Level.Param).toVector, t,
-      numParams, intros.grouped(2).map { case Seq(in, it) => (name(in), expr(it)) }.toVector)
+  def lines(): Vector[ExportFileCommand] = {
+    val out = Vector.newBuilder[ExportFileCommand]
+    while (hasNext()) { line().foreach(out += _); consume('\n') }
+    out.result()
   }
 
-  def lineContent: Rule1[Option[ExportFileCommand]] =
-    rule {
-      int ~ " " ~ (nameDef ~> { (i: Int, n: Name) => write(name, i, n, Name.Anon); None } |
-        exprDef ~> { (i: Int, e: Expr) => write(expr, i, e, Sort(0)); None } |
-        levelDef ~> { (i: Int, l: Level) => write(level, i, l, Level.Zero); None }) |
-        notationDef ~> ((x: Notation) => Some(ExportedNotation(x))) |
-        modification ~> ((x: Modification) => Some(ExportedModification(x)))
+  def line(): Option[ExportFileCommand] =
+    next() match {
+      case c if '0' <= c && c <= '9' =>
+        val n = long(c - '0').toInt
+        consume(' '); consume('#')
+        next() match {
+          case 'N' => write(name, n, nameDef(), Name.Anon)
+          case 'U' => write(level, n, levelDef(), Level.Zero)
+          case 'E' => write(expr, n, exprDef(), Sort.Prop)
+        }
+        None
+      case '#' =>
+        next() match {
+          case 'A' =>
+            consume('X')
+            val n = spc(nameRef())
+            val t = spc(exprRef())
+            val ups = univParams()
+            Some(ExportedModification(AxiomMod(n, ups, t)))
+          case 'D' =>
+            consume('E'); consume('F')
+            val n = spc(nameRef())
+            val t = spc(exprRef())
+            val v = spc(exprRef())
+            val ups = univParams()
+            Some(ExportedModification(DefMod(n, ups, t, v)))
+          case 'Q' =>
+            consume("UOT")
+            Some(ExportedModification(QuotMod))
+          case 'I' =>
+            consume('N')
+            next() match {
+              case 'F' =>
+                consume("IX ")
+                Some(ExportedNotation(Infix(nameRef(), spc(num()), spc(rest()))))
+              case 'D' =>
+                val numParams = spc(num())
+                val n = spc(nameRef())
+                val t = spc(exprRef())
+                val numIntros = spc(num())
+                val rest = restOf(num())
+                val (intros, ps) = rest.splitAt(2 * numIntros)
+                Some(ExportedModification(IndMod(
+                  n, ps.view.map(name).map(Level.Param).toVector, t,
+                  numParams, intros.grouped(2).map { case Seq(in, it) => (name(in), expr(it)) }.toVector)))
+            }
+          case 'P' =>
+            next() match {
+              case 'R' =>
+                consume("EFIX ")
+                Some(ExportedNotation(Prefix(nameRef(), spc(num()), spc(rest()))))
+              case 'O' =>
+                consume("STFIX ")
+                Some(ExportedNotation(Postfix(nameRef(), spc(num()), spc(rest()))))
+            }
+        }
     }
 
-  def lineWithoutNL: Rule1[Option[ExportFileCommand]] = rule { lineContent ~ EOI }
+  def num(): Int = long().toInt
+  def long(): Long =
+    next() match { case c if '0' <= c && c <= '9' => long(c - '0') }
+  def long(acc: Long): Long =
+    cur() match {
+      case c if '0' <= c && c <= '9' =>
+        next()
+        long(10 * acc + (c - '0'))
+      case _ => acc
+    }
 
-  def lines: Rule1[Seq[ExportFileCommand]] = rule {
-    ((lineContent ~ "\n").* ~> ((cmds: Seq[Option[ExportFileCommand]]) => cmds.flatten)) ~ EOI
+  def rest(): String = {
+    val start = index
+    def nextNL(): Int = if (cur() == '\n') index else { next(); nextNL() }
+    new String(bytes, start, math.max(nextNL() - start, 0), LinesParser.UTF8)
   }
+
+  def nameRef(): Name = name(num())
+  def nameDef(): Name =
+    next() match {
+      case 'S' => Name.Str(spc(nameRef()), spc(rest()))
+      case 'I' => Name.Num(spc(nameRef()), spc(long()))
+    }
+
+  def levelRef(): Level = level(num())
+  def levelDef(): Level =
+    next() match {
+      case 'S' => Level.Succ(spc(levelRef()))
+      case 'M' => Level.Max(spc(levelRef()), spc(levelRef()))
+      case 'I' => Level.IMax(c('M', spc(levelRef())), spc(levelRef()))
+      case 'P' => Level.Param(spc(nameRef()))
+    }
+
+  @inline def restOf[T](p: => T): Vector[T] = {
+    val out = Vector.newBuilder[T]
+    while (cur() == ' ') { next(); out += p }
+    out.result()
+  }
+
+  def binderInfo(): BinderInfo = {
+    consume('#'); consume('B')
+    next() match {
+      case 'D' => BinderInfo.Default
+      case 'I' => BinderInfo.Implicit
+      case 'C' => BinderInfo.InstImplicit
+      case 'S' => BinderInfo.StrictImplicit
+    }
+  }
+
+  @inline def c[T](c: Char, p: => T): T = { consume(c); p }
+  @inline def spc[T](p: => T): T = c(' ', p)
+
+  def exprRef(): Expr = expr(num())
+  def exprDef(): Expr =
+    next() match {
+      case 'V' =>
+        Var(spc(num()))
+      case 'S' =>
+        Sort(spc(levelRef()))
+      case 'C' =>
+        Const(spc(nameRef()), restOf(levelRef()))
+      case 'A' =>
+        App(spc(exprRef()), spc(exprRef()))
+      case 'L' =>
+        val b = spc(binderInfo())
+        val n = spc(nameRef())
+        val d = spc(exprRef())
+        val e = spc(exprRef())
+        Lam(Binding(n, d, b), e)
+      case 'P' =>
+        val b = spc(binderInfo())
+        val n = spc(nameRef())
+        val d = spc(exprRef())
+        val e = spc(exprRef())
+        Pi(Binding(n, d, b), e)
+      case 'Z' =>
+        val n = spc(nameRef())
+        val t = spc(exprRef())
+        val v = spc(exprRef())
+        val e = spc(exprRef())
+        Let(Binding(n, t, BinderInfo.Default), v, e)
+    }
+
+  def univParams(): Vector[Level.Param] =
+    restOf(Level.Param(nameRef()))
+}
+object LinesParser {
+  val UTF8: Charset = Charset.forName("UTF-8")
 }
 
 object TextExportParser {
-  @tailrec
-  private def reverseIndexOf(chunk: Array[Byte], needle: Byte, from: Int): Int =
+  @tailrec private def reverseIndexOf(chunk: Array[Byte], needle: Byte, from: Int): Int =
     if (chunk(from) == needle) from
     else if (from == 0) -1
     else reverseIndexOf(chunk, needle, from - 1)
 
-  private class Chunk(bytes: Array[Byte], endIndex: Int) extends DefaultParserInput {
-    val length: Int = endIndex
-    def charAt(ix: Int): Char = (bytes(ix) & 0xFF).toChar
-    def sliceString(start: Int, end: Int) =
-      new String(bytes, start, math.max(end - start, 0), UTF8)
-    def sliceCharArray(start: Int, end: Int): Array[Char] =
-      UTF8.decode(ByteBuffer.wrap(java.util.Arrays.copyOfRange(bytes, start, end))).array()
-  }
-
-  def parseFile(fn: String): Stream[ExportFileCommand] = {
-    val in = new FileInputStream(fn)
+  def parseStream(in: InputStream): Stream[ExportFileCommand] = {
     def bufSize = 8 << 10
+    case class Chunk(bytes: Array[Byte], endIndex: Int)
     def readChunksCore(buf: Array[Byte], begin: Int): Stream[Chunk] = {
       val len = in.read(buf, begin, buf.length - begin)
       if (len <= 0) Stream.empty else {
@@ -154,26 +215,19 @@ object TextExportParser {
         if (nl == -1) {
           // no newline found in the whole chunk,
           // this should only happen at the end but let's try again to make sure
-          new Chunk(buf, len) #:: readChunks()
+          Chunk(buf, len) #:: readChunks()
         } else {
           val nextBuf = new Array[Byte](bufSize)
           val reuse = (begin + len) - (nl + 1)
           System.arraycopy(buf, nl + 1, nextBuf, 0, reuse)
-          new Chunk(buf, nl + 1) #:: readChunksCore(nextBuf, reuse)
+          Chunk(buf, nl + 1) #:: readChunksCore(nextBuf, reuse)
         }
       }
     }
     def readChunks(): Stream[Chunk] = readChunksCore(new Array[Byte](bufSize), 0)
     val parser = new TextExportParser
-    readChunks().flatMap { chunk =>
-      val lineParser = new LineParser(parser, chunk)
-      lineParser.lines.run() match {
-        case Success(mods) =>
-          mods
-        case Failure(error: ParseError) =>
-          throw new IllegalArgumentException(lineParser.formatError(error))
-        case Failure(ex) => throw ex
-      }
-    }
+    readChunks().flatMap(chunk => new LinesParser(parser, chunk.bytes, chunk.endIndex).lines())
   }
+
+  def parseFile(fn: String): Stream[ExportFileCommand] = parseStream(new FileInputStream(fn))
 }
