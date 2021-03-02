@@ -3,6 +3,7 @@ package trepplein
 import Name._
 
 import scala.annotation.tailrec
+import scala.collection.immutable.ArraySeq
 import scala.language.implicitConversions
 import scala.runtime.ScalaRunTime
 
@@ -58,12 +59,13 @@ object Name {
     limbs.foldLeft[Name](Anon)(Str)
 
   def fresh(suggestion: Name, blacklist: Set[Name]): Name =
-    (suggestion #:: Stream.from(0).map(i => Name.Num(suggestion, i): Name)).
+    (suggestion #:: LazyList.from(0).map(i => Name.Num(suggestion, i): Name)).
       filterNot(blacklist).head
 
   case object Anon extends Name
   final case class Str(prefix: Name, limb: String) extends Name
   final case class Num(prefix: Name, limb: Long) extends Name
 
-  implicit def ofString(s: String): Name = Name(s.split("\\."): _*)
+  implicit def ofString(s: String): Name =
+    Name(ArraySeq.unsafeWrapArray(s.split("\\.")): _*)
 }

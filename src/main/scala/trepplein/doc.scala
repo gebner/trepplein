@@ -14,7 +14,7 @@ sealed trait Doc {
     case Concat(a, b) => a.flatSize + b.flatSize
     case Nest(_, d) => d.flatSize
     case Text(t) => t.length
-    case Line(orElse) => orElse.size
+    case Line(orElse) => orElse.length
     case Group(a) => a.flatSize
   }
   private val containsLine: Boolean = this match {
@@ -72,12 +72,12 @@ object Doc {
   def zeroWidthLine: Doc = Line("")
   implicit def text(t: String): Doc = Text(t)
 
-  def sep(docs: Traversable[Doc], by: Doc): Doc =
+  def sep(docs: Iterable[Doc], by: Doc): Doc =
     docs.reduceLeftOption(_ <> by <> _).getOrElse(Text(""))
 
-  def spread(cols: Traversable[Doc]): Doc = sep(cols, Text(" "))
+  def spread(cols: Iterable[Doc]): Doc = sep(cols, Text(" "))
   def spread(cols: Doc*): Doc = spread(cols)
-  def stack(lines: Traversable[Doc]): Doc = sep(lines, line)
+  def stack(lines: Iterable[Doc]): Doc = sep(lines, line)
   def stack(cols: Doc*): Doc = stack(cols)
 
   def wordwrap(ds: Iterable[Doc]): Doc =

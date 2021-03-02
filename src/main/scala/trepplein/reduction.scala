@@ -33,7 +33,7 @@ final case class ReductionRule(ctx: Vector[Binding], lhs: Expr, rhs: Expr, defEq
       (a, b) match {
         case (App(a1, a2), App(b1, b2)) => go(a1, b1) && go(a2, b2)
         case (Const(an, als), Const(bn, bls)) if an == bn =>
-          (als, bls).zipped.foreach { (al, bl) => univSubst(al.asInstanceOf[Level.Param]) = bl }
+          als.lazyZip(bls).foreach { (al, bl) => univSubst(al.asInstanceOf[Level.Param]) = bl }
           true
         case (Var(i), _) =>
           subst(i) = b; true
@@ -80,7 +80,7 @@ final class ReductionMap private (keyMap: Map[Name, (Vector[ReductionRule], Set[
     new ReductionMap(keyMap.updated(reductionRule.lhsConst, (rs :+ reductionRule) -> (ms ++ reductionRule.major)))
   }
 
-  def ++(rs: Traversable[ReductionRule]): ReductionMap = rs.foldLeft(this)((t, r) => t + r)
+  def ++(rs: Iterable[ReductionRule]): ReductionMap = rs.foldLeft(this)((t, r) => t + r)
 
   def major(k: Name): Set[Int] = keyMap(k)._2
 
@@ -92,7 +92,7 @@ final class ReductionMap private (keyMap: Map[Name, (Vector[ReductionRule], Set[
       case Apps(hd @ Const(c, _), as) =>
         val it = keyMap(c)._1.iterator
         while (it.hasNext) {
-          val res = it.next.apply(hd, as)
+          val res = it.next().apply(hd, as)
           if (res.isDefined) return res
         }
         None

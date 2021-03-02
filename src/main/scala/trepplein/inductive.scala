@@ -31,10 +31,10 @@ final case class CompiledIndMod(indMod: IndMod, env: PreEnvironment) extends Com
       case nonRecArg => Left(nonRecArg)
     }
 
-    lazy val ihs: Traversable[LocalConst] = (arguments, argInfos).zipped.collect {
+    lazy val ihs: List[LocalConst] = arguments.lazyZip(argInfos).collect {
       case (recArg, Right((eps, recIndices))) =>
         LocalConst(Binding("ih", Pis(eps)(mkMotiveApp(recIndices, Apps(recArg, eps))), BinderInfo.Default))
-    }
+    }.toList
 
     lazy val minorPremise = LocalConst(Binding("h", Pis(arguments ++ ihs)(mkMotiveApp(
       introTyIndices,

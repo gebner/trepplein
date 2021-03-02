@@ -91,7 +91,7 @@ case class MainOpts(
 object MainOpts {
   val parser = new scopt.OptionParser[MainOpts]("trepplein") {
     head("trepplein", "1.0")
-    override def showUsageOnError = true
+    override def showUsageOnError = Some(true)
 
     opt[Unit]('s', "sequential").action((_, c) => c.copy(parallel = false))
       .text("type-check declarations on one thread only")

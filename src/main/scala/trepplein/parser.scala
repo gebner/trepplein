@@ -205,12 +205,12 @@ object TextExportParser {
     else if (from == 0) -1
     else reverseIndexOf(chunk, needle, from - 1)
 
-  def parseStream(in: InputStream): Stream[ExportFileCommand] = {
+  def parseStream(in: InputStream): LazyList[ExportFileCommand] = {
     def bufSize = 8 << 10
     case class Chunk(bytes: Array[Byte], endIndex: Int)
-    def readChunksCore(buf: Array[Byte], begin: Int): Stream[Chunk] = {
+    def readChunksCore(buf: Array[Byte], begin: Int): LazyList[Chunk] = {
       val len = in.read(buf, begin, buf.length - begin)
-      if (len <= 0) Stream.empty else {
+      if (len <= 0) LazyList.empty else {
         val nl = reverseIndexOf(buf, '\n', begin + len - 1)
         if (nl == -1) {
           // no newline found in the whole chunk,
@@ -224,10 +224,10 @@ object TextExportParser {
         }
       }
     }
-    def readChunks(): Stream[Chunk] = readChunksCore(new Array[Byte](bufSize), 0)
+    def readChunks(): LazyList[Chunk] = readChunksCore(new Array[Byte](bufSize), 0)
     val parser = new TextExportParser
     readChunks().flatMap(chunk => new LinesParser(parser, chunk.bytes, chunk.endIndex).lines())
   }
 
-  def parseFile(fn: String): Stream[ExportFileCommand] = parseStream(new FileInputStream(fn))
+  def parseFile(fn: String): LazyList[ExportFileCommand] = parseStream(new FileInputStream(fn))
 }

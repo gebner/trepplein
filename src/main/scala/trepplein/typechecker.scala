@@ -7,7 +7,7 @@ sealed trait DefEqRes {
   @inline final def &(that: => DefEqRes): DefEqRes = if (this != IsDefEq) this else that
 }
 case object IsDefEq extends DefEqRes {
-  def forall(rs: Traversable[DefEqRes]): DefEqRes =
+  def forall(rs: Iterable[DefEqRes]): DefEqRes =
     rs.collectFirst { case r: NotDefEq => r }.getOrElse(IsDefEq)
 }
 final case class NotDefEq(a: Expr, b: Expr) extends DefEqRes
@@ -92,11 +92,12 @@ class TypeChecker(val env: PreEnvironment, val unsafeUnchecked: Boolean = false)
     val e1 @ Apps(fn1, as1) = whnfCore(e1_0)(transparency)
     val e2 @ Apps(fn2, as2) = whnfCore(e2_0)(transparency)
     def checkArgs: DefEqRes =
-      reqDefEq(as1.size == as2.size, e1, e2) & IsDefEq.forall((as1, as2).zipped.view.map { case (a, b) => checkDefEq(a, b) })
+      reqDefEq(as1.size == as2.size, e1, e2) &
+        IsDefEq.forall(as1.lazyZip(as2).view.map { case (a, b) => checkDefEq(a, b) })
     ((fn1, fn2) match {
       case (Sort(l1), Sort(l2)) =>
         return reqDefEq(isDefEq(l1, l2) && as1.isEmpty && as2.isEmpty, e1, e2)
-      case (Const(c1, ls1), Const(c2, ls2)) if c1 == c2 && (ls1, ls2).zipped.forall(isDefEq) =>
+      case (Const(c1, ls1), Const(c2, ls2)) if c1 == c2 && ls1.lazyZip(ls2).forall(isDefEq) =>
         checkArgs
       case (LocalConst(_, i1), LocalConst(_, i2)) if i1 == i2 =>
         checkArgs
