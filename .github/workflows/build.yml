@@ -1,0 +1,47 @@
+on:
+  pull_request:
+  push:
+    branches:
+      - '*'
+    tags:
+      - '*'
+
+name: ci
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions/setup-java@v2
+        with:
+          distribution: 'adopt'
+          java-version: '16'
+
+      - name: install sbt
+        run: |
+          pushd ..
+          sbt_version=1.5.1
+          wget https://github.com/sbt/sbt/releases/download/v$sbt_version/sbt-$sbt_version.tgz
+          tar xf sbt-$sbt_version.tgz
+          echo $PWD/sbt/bin >>$GITHUB_PATH
+          popd
+
+      - name: build trepplein
+        run: sbt compile
+
+      - name: create release zip
+        run: sbt universal:packageBin
+
+      - name: release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: target/universal/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: run unit tests
+        run: sbt test

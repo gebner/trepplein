@@ -3,6 +3,7 @@ description := "Independent type-checker for the dependently typed theorem prove
 homepage := Some(url("https://github.com/gebner/trepplein"))
 startYear := Some(2017)
 licenses := Seq("Apache-2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0.html"))
+maintainer := "gebner@gebner.org"
 
 version := "1.0"
 
