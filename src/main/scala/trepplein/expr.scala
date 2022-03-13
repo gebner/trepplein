@@ -22,6 +22,11 @@ case class Binding(prettyName: Name, ty: Expr, info: BinderInfo) {
     s"Binding(${prettyName.dump}, ${ty.dump}, ${info.dump})"
 
   override val hashCode: Int = prettyName.hashCode + 37 * (ty.hashCode + 37 * info.hashCode)
+
+  def equalsCore(that: Binding)(implicit cache: ExprEqCache): Boolean =
+    this.info == that.info &&
+      this.ty.equalsCore(that.ty) &&
+      this.prettyName == that.prettyName
 }
 
 private class ExprCache extends java.util.IdentityHashMap[Expr, Expr] {
@@ -43,9 +48,34 @@ private class ExprOffCache extends mutable.ArrayBuffer[ExprCache] {
   }
 }
 
+private class ExprEqCache extends java.util.IdentityHashMap[Expr, UFNode] {
+  def find(e: Expr): UFNode = {
+    var n = get(e)
+    if (n == null) {
+      n = new UFNode
+      put(e, n)
+    } else {
+      n = n.find()
+    }
+    n
+  }
+
+  @inline final def checkAndThenUnion(a: Expr, b: Expr)(v: (Expr, Expr) => Boolean): Boolean = {
+    val a_ = find(a)
+    val b_ = find(b)
+    if (a_ eq b_) return true
+    if (v(a, b)) {
+      a_.union(b_)
+      true
+    } else {
+      false
+    }
+  }
+}
+
 private object Breadcrumb
 
-sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Product {
+sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean, override val hashCode: Int) extends Product {
   final def hasVar(i: Int): Boolean =
     this match {
       case _ if varBound <= i => false
@@ -57,6 +87,26 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
     }
 
   def hasVars: Boolean = varBound > 0
+
+  override def equals(that: Any): Boolean =
+    that match {
+      case that: Expr => equals(that)
+      case _ => false
+    }
+  def equals(that: Expr): Boolean = equalsCore(that)(new ExprEqCache)
+  def equalsCore(that: Expr)(implicit cache: ExprEqCache): Boolean =
+    (this eq that) || this.hashCode == that.hashCode &&
+      cache.checkAndThenUnion(this, that) {
+        case (Var(i1), Var(i2)) => i1 == i2
+        case (Sort(l1), Sort(l2)) => l1 == l2
+        case (Const(n1, l1), Const(n2, l2)) => n1 == n2 && l1 == l2
+        case (LocalConst(_, n1), LocalConst(_, n2)) => n1 == n2
+        case (App(a1, b1), App(a2, b2)) => a1.equalsCore(a2) && b1.equalsCore(b2)
+        case (Lam(d1, b1), Lam(d2, b2)) => d1.equalsCore(d2) && b1.equalsCore(b2)
+        case (Pi(d1, b1), Pi(d2, b2)) => d1.equalsCore(d2) && b1.equalsCore(b2)
+        case (Let(d1, v1, b1), Let(d2, v2, b2)) => d1.equalsCore(d2) && v1.equalsCore(v2) && b1.equalsCore(b2)
+        case _ => false
+      }
 
   def abstr(lc: LocalConst): Expr = abstr(0, Vector(lc))
   def abstr(off: Int, lcs: Vector[LocalConst]): Expr =
@@ -192,43 +242,33 @@ sealed abstract class Expr(val varBound: Int, val hasLocals: Boolean) extends Pr
       case Let(dom, value, body) => s"Let(${dom.dump}, ${value.dump}, ${body.dump})"
     }
 }
-case class Var(idx: Int) extends Expr(varBound = idx + 1, hasLocals = false) {
-  override def hashCode: Int = idx
-}
-case class Sort(level: Level) extends Expr(varBound = 0, hasLocals = false) {
-  override val hashCode: Int = level.hashCode
-}
+case class Var(idx: Int) extends Expr(varBound = idx + 1, hasLocals = false, hashCode = idx)
+case class Sort(level: Level) extends Expr(varBound = 0, hasLocals = false, hashCode = level.hashCode)
 
-case class Const(name: Name, levels: Vector[Level]) extends Expr(varBound = 0, hasLocals = false) {
-  override val hashCode: Int = 37 * name.hashCode
-}
-case class LocalConst(of: Binding, name: LocalConst.Name = new LocalConst.Name) extends Expr(varBound = 0, hasLocals = true) {
-  override val hashCode: Int = 4 + 37 * of.hashCode + name.hashCode
-}
+case class Const(name: Name, levels: Vector[Level])
+  extends Expr(varBound = 0, hasLocals = false, hashCode = 37 * name.hashCode)
+case class LocalConst(of: Binding, name: LocalConst.Name = new LocalConst.Name)
+  extends Expr(varBound = 0, hasLocals = true, hashCode = 4 + name.hashCode)
 case class App(a: Expr, b: Expr)
   extends Expr(
     varBound = math.max(a.varBound, b.varBound),
-    hasLocals = a.hasLocals || b.hasLocals) {
-  override val hashCode: Int = a.hashCode + 37 * b.hashCode
-}
+    hasLocals = a.hasLocals || b.hasLocals,
+    hashCode = a.hashCode + 37 * b.hashCode)
 case class Lam(domain: Binding, body: Expr)
   extends Expr(
     varBound = math.max(domain.ty.varBound, body.varBound - 1),
-    hasLocals = domain.ty.hasLocals || body.hasLocals) {
-  override val hashCode: Int = 1 + 37 * domain.hashCode + body.hashCode
-}
+    hasLocals = domain.ty.hasLocals || body.hasLocals,
+    hashCode = 1 + 37 * domain.hashCode + body.hashCode)
 case class Pi(domain: Binding, body: Expr)
   extends Expr(
     varBound = math.max(domain.ty.varBound, body.varBound - 1),
-    hasLocals = domain.ty.hasLocals || body.hasLocals) {
-  override val hashCode: Int = 2 + 37 * domain.hashCode + body.hashCode
-}
+    hasLocals = domain.ty.hasLocals || body.hasLocals,
+    hashCode = 2 + 37 * domain.hashCode + body.hashCode)
 case class Let(domain: Binding, value: Expr, body: Expr)
   extends Expr(
     varBound = math.max(math.max(domain.ty.varBound, value.varBound), body.varBound - 1),
-    hasLocals = domain.ty.hasLocals || value.hasLocals || body.hasLocals) {
-  override val hashCode: Int = 3 + 37 * (domain.hashCode + 37 * value.hashCode) + body.hashCode
-}
+    hasLocals = domain.ty.hasLocals || value.hasLocals || body.hasLocals,
+    hashCode = 3 + 37 * (domain.hashCode + 37 * value.hashCode) + body.hashCode)
 
 object Sort {
   val Prop = Sort(Level.Zero)
