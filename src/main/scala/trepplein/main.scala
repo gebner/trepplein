@@ -90,7 +90,7 @@ case class MainOpts(
 }
 object MainOpts {
   val parser = new scopt.OptionParser[MainOpts]("trepplein") {
-    head("trepplein", "1.0")
+    head("trepplein", "1.1")
     override def showUsageOnError = Some(true)
 
     opt[Unit]('s', "sequential").action((_, c) => c.copy(parallel = false))
